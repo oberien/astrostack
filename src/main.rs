@@ -3,6 +3,7 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use image::io::Reader;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use clap::{builder::ValueParser, Parser, ValueEnum};
+use either::Either;
 
 mod postprocessing;
 mod colorspace;
@@ -47,11 +48,17 @@ fn main() {
     let args: Args = Args::parse();
 
     let files: Vec<_> = args.imagepaths.into_iter()
-        .flat_map(|path| path.read_dir().unwrap())
+        .flat_map(|path| {
+            if path.is_dir() {
+                Either::Left(path.read_dir().unwrap().map(|entry| entry.unwrap().path()))
+            } else if path.is_file() {
+                Either::Right([path].into_iter())
+            } else {
+                panic!("input path {} is neither directory nor file", path.display())
+            }
+        })
         .skip(args.skip_files)
         .take(args.num_files)
-        .map(|entry| entry.unwrap())
-        .map(|entry| entry.path())
         .collect();
     let (width, height) = Reader::open(&files[0]).unwrap().decode().unwrap().dimensions();
 

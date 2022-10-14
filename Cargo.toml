@@ -11,6 +11,7 @@ imageproc = "0.23.0"
 rayon = "1.5.3"
 clap = { version = "4.0.10", features = ["derive"] }
 cv = "0.6.0"
+either = "1.8.0"
 
 [patch.crates-io]
 image = { path = "../image" }
