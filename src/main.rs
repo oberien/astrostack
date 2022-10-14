@@ -92,7 +92,7 @@ fn main() {
             buf
         });
 
-    postprocessing::process(&mut res, num_files, &args.registration);
+    postprocessing::process(&mut res, num_files, &args.postprocessing);
 
     for pixel in res.pixels_mut() {
         *pixel = args.colorspace.convert_back(*pixel);
