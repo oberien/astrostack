@@ -2,9 +2,11 @@ use std::path::PathBuf;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use image::io::Reader;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use clap::{builder::ValueParser, Parser, ValueEnum};
+use clap::{builder::ValueParser, Parser, ValueEnum, error::ErrorKind, CommandFactory};
 use either::Either;
 
+mod helpers;
+mod registration;
 mod postprocessing;
 mod colorspace;
 
@@ -14,6 +16,9 @@ struct Args {
     imagepaths: Vec<PathBuf>,
     #[arg(short = 'c', long, value_enum)]
     colorspace: Colorspace,
+    /// Processing chain for alignment registration; must end with akaze
+    #[arg(short = 'r', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
+    registration: Vec<Postprocessing>,
     #[arg(short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
     postprocessing: Vec<Postprocessing>,
     #[arg(short = 'n', default_value_t = 100)]
@@ -31,7 +36,7 @@ enum Colorspace {
     Sqrt,
 }
 #[derive(Clone)]
-enum Postprocessing {
+pub enum Postprocessing {
     Average,
     Maxscale,
     Sqrt,
@@ -46,6 +51,15 @@ enum Postprocessing {
 
 fn main() {
     let args: Args = Args::parse();
+    // validate arguments
+    match args.registration.last() {
+        Some(Postprocessing::Akaze(_)) => (),
+        None => (),
+        _ => Args::command().error(
+            ErrorKind::ArgumentConflict,
+            "last registration processing chain must be `akaze`",
+        ).exit(),
+    }
 
     let files: Vec<_> = args.imagepaths.into_iter()
         .flat_map(|path| {
@@ -61,8 +75,9 @@ fn main() {
         .take(args.num_files)
         .collect();
     let (width, height) = Reader::open(&files[0]).unwrap().decode().unwrap().dimensions();
-
     let num_files = files.len();
+
+    registration::register(&files, width, height, num_files, &args.registration);
 
     let mut res = files.into_par_iter()
         .map(|path| Reader::open(path).unwrap().decode().unwrap().into_rgb64f())
@@ -77,17 +92,7 @@ fn main() {
             buf
         });
 
-    for postprocess in args.postprocessing {
-        match postprocess {
-            Postprocessing::Average => postprocessing::average(&mut res, num_files),
-            Postprocessing::Maxscale => postprocessing::maxscale(&mut res),
-            Postprocessing::Sqrt => postprocessing::sqrt(&mut res),
-            Postprocessing::Asinh => postprocessing::asinh(&mut res),
-            Postprocessing::Akaze(threshold) => postprocessing::akaze_draw(&mut res, threshold),
-            Postprocessing::Sobel(blur) => postprocessing::sobel(&mut res, blur),
-            Postprocessing::Blur(sigma) => postprocessing::gaussian_blur(&mut res, sigma),
-        }
-    }
+    postprocessing::process(&mut res, num_files, &args.registration);
 
     for pixel in res.pixels_mut() {
         *pixel = args.colorspace.convert_back(*pixel);
