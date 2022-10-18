@@ -1,6 +1,6 @@
 use cv::bitarray::BitArray;
 use cv::feature::akaze::{Akaze, KeyPoint};
-use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb64FImage};
+use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb64FImage};
 use image::buffer::ConvertBuffer;
 
 // from https://github.com/dangreco/edgy/blob/master/src/main.rs
@@ -44,4 +44,52 @@ pub fn akaze(buf: &Rgb64FImage, threshold: f64) -> (Vec<KeyPoint>, Vec<BitArray<
     let detector = Akaze::new(threshold);
     let luma16: ImageBuffer<Luma<u16>, Vec<u16>> = buf.convert();
     detector.extract(&DynamicImage::ImageLuma16(luma16))
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Object {
+    pub left: u32,
+    pub right: u32,
+    pub top: u32,
+    pub bottom: u32,
+    pub middle: (u32, u32),
+}
+
+pub fn single_object_detection(buf: &Rgb64FImage, threshold: f64) -> Object {
+    let mut left = u32::MAX;
+    let mut right = 0;
+    let mut top = u32::MAX;
+    let mut bottom = 0;
+    for (x, y, pixel) in buf.enumerate_pixels() {
+        let value = pixel.0.into_iter().sum::<f64>() / 3.;
+        if value >= threshold {
+            left = x.min(left);
+            right = x.max(right);
+            top = y.min(top);
+            bottom = y.max(bottom);
+        }
+    }
+    let middlex = left + (right - left) / 2;
+    let middley = top + (bottom - top) / 2;
+    Object {
+        left, right, top, bottom,
+        middle: (middlex, middley),
+    }
+}
+
+pub fn draw_object(buf: &mut Rgb64FImage, object: Object) {
+    let left = (object.left as f32, object.middle.1 as f32);
+    let right = (object.right as f32, object.middle.1 as f32);
+    let top = (object.middle.0 as f32, object.top as f32);
+    let bottom = (object.middle.0 as f32, object.bottom as f32);
+    imageproc::drawing::draw_line_segment_mut(buf, left, right, Rgb([1., 0., 0.]));
+    imageproc::drawing::draw_line_segment_mut(buf, top, bottom, Rgb([1., 0., 0.]));
+}
+
+pub fn akaze_draw_kp(buf: &mut Rgb64FImage, keypoint: KeyPoint) {
+    let KeyPoint { point, size, angle, .. } = keypoint;
+    let color = Rgb([1.,0.,0.]);
+    imageproc::drawing::draw_hollow_circle_mut(buf, (point.0 as i32, point.1 as i32), size as i32, color);
+    let (endx, endy) = (point.0 + size * angle.cos(), point.1 + size * angle.sin());
+    imageproc::drawing::draw_line_segment_mut(buf, point, (endx, endy), color);
 }

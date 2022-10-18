@@ -19,3 +19,6 @@ itertools = "0.10.5"
 image = { path = "../image" }
 #image = { git = "https://github.com/oberien/image", branch = "rgb64f" }
 cv = { path = "../cv/cv" }
+
+[profile.release]
+debug = true

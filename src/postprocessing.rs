@@ -1,6 +1,5 @@
-use cv::feature::akaze::KeyPoint;
 use image::{DynamicImage, Rgb, Rgb64FImage};
-use crate::Postprocessing;
+use crate::{helpers, Postprocessing};
 
 pub fn process(buf: &mut Rgb64FImage, num_files: usize, postprocessing: &[Postprocessing]) {
     for postprocess in postprocessing {
@@ -12,6 +11,9 @@ pub fn process(buf: &mut Rgb64FImage, num_files: usize, postprocessing: &[Postpr
             &Postprocessing::Akaze(threshold) => akaze_draw(buf, threshold),
             &Postprocessing::Sobel(blur) => sobel(buf, blur),
             &Postprocessing::Blur(sigma) => gaussian_blur(buf, sigma),
+            &Postprocessing::BGone(threshold) => background_extract(buf, threshold),
+            &Postprocessing::BlackWhite(threshold) => black_while(buf, threshold),
+            &Postprocessing::SingleObjectDetection(threshold) => single_object_detection(buf, threshold),
         }
     }
 }
@@ -64,17 +66,34 @@ pub fn gaussian_blur(buf: &mut Rgb64FImage, sigma: f32) {
     *buf = image::imageops::blur(buf, sigma)
 }
 
-pub fn akaze_draw(buf: &mut Rgb64FImage, threshold: f64) {
-    let (keypoints, _descriptors) = crate::helpers::akaze(buf, threshold);
-    for keypoint in keypoints {
-        akaze_draw_kp(buf, keypoint);
+pub fn background_extract(buf: &mut Rgb64FImage, threshold: f64) {
+    for pixel in buf.pixels_mut() {
+        let value = pixel.0.into_iter().sum::<f64>() / 3.;
+        if value < threshold {
+            *pixel = Rgb([0., 0., 0.]);
+        }
     }
 }
 
-pub fn akaze_draw_kp(buf: &mut Rgb64FImage, keypoint: KeyPoint) {
-    let KeyPoint { point, size, angle, .. } = keypoint;
-    let color = Rgb([1.,0.,0.]);
-    imageproc::drawing::draw_hollow_circle_mut(buf, (point.0 as i32, point.1 as i32), size as i32, color);
-    let (endx, endy) = (point.0 + size * angle.cos(), point.1 + size * angle.sin());
-    imageproc::drawing::draw_line_segment_mut(buf, point, (endx, endy), color);
+pub fn black_while(buf: &mut Rgb64FImage, threshold: f64) {
+    for pixel in buf.pixels_mut() {
+        let value = pixel.0.into_iter().sum::<f64>() / 3.;
+        if value < threshold {
+            *pixel = Rgb([0., 0., 0.]);
+        } else {
+            *pixel = Rgb([1., 1., 1.]);
+        }
+    }
+}
+
+pub fn single_object_detection(buf: &mut Rgb64FImage, threshold: f64) {
+    let object = helpers::single_object_detection(buf, threshold);
+    helpers::draw_object(buf, object);
+}
+
+pub fn akaze_draw(buf: &mut Rgb64FImage, threshold: f64) {
+    let (keypoints, _descriptors) = helpers::akaze(buf, threshold);
+    for keypoint in keypoints {
+        helpers::akaze_draw_kp(buf, keypoint);
+    }
 }
