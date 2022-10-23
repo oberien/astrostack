@@ -81,11 +81,40 @@ pub fn single_object_detection(buf: &Rgb64FImage, threshold: f64) -> Object {
     }
 }
 
+pub fn average_brightness(buf: &Rgb64FImage, threshold: f64) -> (f64, f64) {
+    let mut sum = 0.0;
+    let mut weighted_sum_rows = 0.0;
+    let mut weighted_sum_columns = 0.0;
+
+    for (x, y, pixel) in buf.enumerate_pixels() {
+        let value = pixel.0.into_iter().sum::<f64>() / 3.;
+        if value < threshold {
+            continue;
+        }
+        sum += value;
+        weighted_sum_rows += y as f64 * value;
+        weighted_sum_columns += x as f64 * value;
+    }
+    let middlex = weighted_sum_columns / sum;
+    let middley = weighted_sum_rows / sum;
+    (middlex, middley)
+}
+
 pub fn draw_object(buf: &mut Rgb64FImage, object: Object) {
     let left = (object.left as f32, object.middle.1 as f32);
     let right = (object.right as f32, object.middle.1 as f32);
     let top = (object.middle.0 as f32, object.top as f32);
     let bottom = (object.middle.0 as f32, object.bottom as f32);
+    imageproc::drawing::draw_line_segment_mut(buf, left, right, Rgb([1., 0., 0.]));
+    imageproc::drawing::draw_line_segment_mut(buf, top, bottom, Rgb([1., 0., 0.]));
+}
+
+pub fn draw_cross(buf: &mut Rgb64FImage, center: (f32, f32)) {
+    let size = 10.;
+    let left = (center.0 - size, center.1);
+    let right = (center.0 + size, center.1);
+    let top = (center.0, center.1 - size);
+    let bottom = (center.0, center.1 + size);
     imageproc::drawing::draw_line_segment_mut(buf, left, right, Rgb([1., 0., 0.]));
     imageproc::drawing::draw_line_segment_mut(buf, top, bottom, Rgb([1., 0., 0.]));
 }

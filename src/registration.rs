@@ -47,6 +47,7 @@ pub fn register(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usi
         None => return Some((0, 0)),
         Some(&Postprocessing::Akaze(threshold)) => (akaze, threshold),
         Some(&Postprocessing::SingleObjectDetection(threshold)) => (single_object_detection, threshold),
+        Some(&Postprocessing::AverageBrightnessAlignment(threshold)) => (average_brightness_alignment, threshold),
         _ => unreachable!(),
     };
     processing = &processing[..processing.len()-1];
@@ -184,5 +185,18 @@ fn single_object_detection(reference: &ReferenceImage, img: &Rgb64FImage, thresh
     vec![Match::new(
         (o1.middle.0 as f32, o1.middle.1 as f32),
         (o2.middle.0 as f32, o2.middle.1 as f32),
+    )]
+}
+
+fn average_brightness_alignment(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mut Rgb64FImage) -> Vec<Match> {
+    let (leftx, lefty) = helpers::average_brightness(&reference.0, threshold);
+    let (rightx, righty) = helpers::average_brightness(img, threshold);
+
+    helpers::draw_cross(res, (leftx as f32, lefty as f32));
+    helpers::draw_cross(res, ((rightx + reference.0.width() as f64) as f32, righty as f32));
+
+    vec![Match::new(
+        (leftx as f32, lefty as f32),
+        (rightx as f32, righty as f32),
     )]
 }

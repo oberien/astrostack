@@ -18,7 +18,7 @@ struct Args {
     imagepaths: Vec<PathBuf>,
     #[arg(short = 'c', long, value_enum)]
     colorspace: Colorspace,
-    /// Processing chain for alignment registration; must end with `akaze` or `sod`
+    /// Processing chain for alignment registration; must end with `akaze`, `sod` or `aba`
     #[arg(short = 'r', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
     registration: Vec<Postprocessing>,
     #[arg(short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
@@ -57,6 +57,8 @@ pub enum Postprocessing {
     BlackWhite(f64),
     /// single object detection with the given threshold (0.2)
     SingleObjectDetection(f64),
+    /// detect the pixel with the average brightness given threshold (0.2)
+    AverageBrightnessAlignment(f64),
 }
 
 fn main() {
@@ -65,10 +67,11 @@ fn main() {
     match args.registration.last() {
         Some(Postprocessing::Akaze(_)) => (),
         Some(Postprocessing::SingleObjectDetection(_)) => (),
+        Some(Postprocessing::AverageBrightnessAlignment(_)) => (),
         None => (),
         _ => Args::command().error(
             ErrorKind::InvalidValue,
-            "last registration processing chain must be `akaze` or `sod`",
+            "last registration processing chain must be `akaze`, `sod` or `aba`",
         ).exit(),
     }
     dbg!(&args);
@@ -165,6 +168,7 @@ fn parse_postprocessing(p: &str) -> Result<Postprocessing, String> {
         "bgone" => Ok(Postprocessing::BGone(value!(value, 0.2))),
         "bw" => Ok(Postprocessing::BlackWhite(value!(value, 0.5))),
         "sod" => Ok(Postprocessing::SingleObjectDetection(value!(value, 0.2))),
+        "aba" => Ok(Postprocessing::AverageBrightnessAlignment(value!(value, 0.2))),
         _ => Err(format!("unknown postprocessing `{typ}`, allowed values are `average`, `maxscale`, `sqrt`, `asinh`, `akaze=0.008`, `sobel=1`, `blur=1.0."))
     }
 }
