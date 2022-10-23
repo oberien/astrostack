@@ -53,6 +53,8 @@ pub struct Object {
     pub top: u32,
     pub bottom: u32,
     pub middle: (u32, u32),
+    pub width: u32,
+    pub height: u32,
 }
 
 pub fn single_object_detection(buf: &Rgb64FImage, threshold: f64) -> Object {
@@ -74,6 +76,8 @@ pub fn single_object_detection(buf: &Rgb64FImage, threshold: f64) -> Object {
     Object {
         left, right, top, bottom,
         middle: (middlex, middley),
+        width: right - left,
+        height: bottom - top,
     }
 }
 

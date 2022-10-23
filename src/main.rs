@@ -68,7 +68,7 @@ fn main() {
         None => (),
         _ => Args::command().error(
             ErrorKind::InvalidValue,
-            "last registration processing chain must be `akaze`",
+            "last registration processing chain must be `akaze` or `sod`",
         ).exit(),
     }
     dbg!(&args);
@@ -83,15 +83,19 @@ fn main() {
                 panic!("input path {} is neither directory nor file", path.display())
             }
         })
+        .collect();
+    files.sort_by_key(|path| path.file_name().unwrap().to_owned());
+    let files: Vec<_> = files.into_iter()
         .skip(args.skip_files)
         .take(args.num_files)
         .collect();
-    files.sort();
+
     let first = Reader::open(&files[0]).unwrap().decode().unwrap().into_rgb64f();
     let (width, height) = first.dimensions();
     let num_files = files.len();
     let reference_image = registration::prepare_reference_image(first, num_files, &args.registration);
 
+    println!("Starting stacking.");
     let counter = AtomicU32::new(0);
     let mut res = files.into_par_iter()
         .map(|path| Reader::open(path).unwrap().decode().unwrap().into_rgb64f())
@@ -100,13 +104,22 @@ fn main() {
             if count % 50 == 0 {
                 println!("{count}");
             }
-            let (dx, dy) = registration::register(
+            let delta = registration::register(
                 &reference_image,
                 image.clone(),
                 num_files,
                 &args.registration,
                 args.debug,
             );
+            let (dx, dy) = match delta {
+                Some((dx, dy)) => (dx, dy),
+                None => {
+                    if args.debug {
+                        println!("rejected");
+                    }
+                    return buf
+                },
+            };
             if args.debug {
                 println!("{dx}:{dy}");
             }
@@ -117,13 +130,19 @@ fn main() {
             buf
         });
 
+    println!("Stacking completed");
+    println!("Starting postprocessing");
     postprocessing::process(&mut res, num_files, &args.postprocessing);
 
     for pixel in res.pixels_mut() {
         *pixel = args.colorspace.convert_back(*pixel);
     }
 
+    println!("Postprocessing completed");
+    println!("Saving Image");
     DynamicImage::ImageRgb64F(res).into_rgb16().save(args.outfile).unwrap();
+    println!("Saving completed");
+    println!("Done");
 }
 
 fn parse_postprocessing(p: &str) -> Result<Postprocessing, String> {

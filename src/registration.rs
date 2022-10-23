@@ -42,9 +42,9 @@ pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usiz
     ReferenceImage(reference_image)
 }
 
-pub fn register(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usize, mut processing: &[Postprocessing], debug: bool) -> (i32, i32) {
+pub fn register(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usize, mut processing: &[Postprocessing], debug: bool) -> Option<(i32, i32)> {
     let (registration_function, threshold): (fn(_, _, _, _) -> Vec<Match>, _) = match processing.last() {
-        None => return (0, 0),
+        None => return Some((0, 0)),
         Some(&Postprocessing::Akaze(threshold)) => (akaze, threshold),
         Some(&Postprocessing::SingleObjectDetection(threshold)) => (single_object_detection, threshold),
         _ => unreachable!(),
@@ -54,13 +54,17 @@ pub fn register(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usi
     crate::postprocessing::process(&mut img, num_files, &processing);
 
     assert_eq!(reference.0.width(), img.width());
-    assert_eq!(reference.0.width(), img.height());
+    assert_eq!(reference.0.height(), img.height());
     let mut res = ImageBuffer::new(reference.0.width() * 2, reference.0.height());
     res.copy_from(&reference.0, 0, 0).unwrap();
     res.copy_from(&img, reference.0.width(), 0).unwrap();
 
     let mut matches = registration_function(reference, &img, threshold, &mut res);
     matches.sort_by(|m1, m2| m1.arc.total_cmp(&m2.arc));
+
+    if matches.is_empty() {
+        return None;
+    }
 
     // reject everything deviating >5° from the median
     let median_arcdeg = matches[matches.len() / 2].arcdeg;
@@ -101,10 +105,10 @@ pub fn register(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usi
 
     // average all resulting offsets
     let (dx, dy) = matches.iter().fold((0., 0.), |(dx, dy), m| (dx+m.dx, dy+m.dy));
-    (
+    Some((
         (dx / matches.len() as f32).round() as i32,
         (dy / matches.len() as f32).round() as i32,
-    )
+    ))
 }
 
 fn akaze(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mut Rgb64FImage) -> Vec<Match> {
@@ -158,13 +162,21 @@ fn akaze(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mu
 fn single_object_detection(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mut Rgb64FImage) -> Vec<Match> {
     let o1 = helpers::single_object_detection(&reference.0, threshold);
     let o2 = helpers::single_object_detection(img, threshold);
+    // reject everything with more than 2% diff from the reference image
+    let dwidth = (o1.width as f32 / o2.width as f32 - 1.).abs();
+    let dheight = (o1.height as f32 / o2.height as f32 - 1.).abs();
+    if dwidth > 0.02 || dheight > 0.02 {
+        return Vec::new();
+    }
 
     let o2right = Object {
         left: o2.left + reference.0.width(),
         right: o2.right + reference.0.width(),
         top: o2.top,
         bottom: o2.bottom,
-        middle: (o2.middle.0 + reference.0.width(), o2.middle.1)
+        middle: (o2.middle.0 + reference.0.width(), o2.middle.1),
+        width: o2.width,
+        height: o2.height,
     };
     helpers::draw_object(res, o1);
     helpers::draw_object(res, o2right);
