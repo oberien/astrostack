@@ -34,6 +34,7 @@ dependencies = [
 [[package]]
 name = "akaze"
 version = "0.7.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "bitarray",
  "cv-core",
@@ -412,6 +413,7 @@ checksum = "ef8ae57c4978a2acd8b869ce6b9ca1dfe817bff704c220209fdef2c0b75a01b9"
 [[package]]
 name = "cv"
 version = "0.6.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "akaze",
  "arrsac",
@@ -433,6 +435,7 @@ dependencies = [
 [[package]]
 name = "cv-core"
 version = "0.15.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "derive_more",
  "nalgebra",
@@ -443,6 +446,7 @@ dependencies = [
 [[package]]
 name = "cv-geom"
 version = "0.7.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "cv-core",
  "float-ord 0.3.2",
@@ -451,6 +455,7 @@ dependencies = [
 [[package]]
 name = "cv-pinhole"
 version = "0.6.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "cv-core",
  "derive_more",
@@ -577,6 +582,7 @@ dependencies = [
 [[package]]
 name = "eight-point"
 version = "0.8.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "arrayvec",
  "cv-core",
@@ -852,6 +858,7 @@ dependencies = [
 [[package]]
 name = "image"
 version = "0.24.4"
+source = "git+https://github.com/oberien/image?branch=rgb64f#92c32c3be09a5b8eb69fc1d4291db4748cd5e7d2"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -955,6 +962,7 @@ dependencies = [
 [[package]]
 name = "lambda-twist"
 version = "0.7.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "arrayvec",
  "cv-core",
@@ -1207,6 +1215,7 @@ dependencies = [
 [[package]]
 name = "nister-stewenius"
 version = "0.1.0"
+source = "git+https://github.com/oberien/cv#fbf63ad9daf4ed4dd8050a2bc25a14a65fc15419"
 dependencies = [
  "arrayvec",
  "cv-core",

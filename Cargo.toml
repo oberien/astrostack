@@ -16,9 +16,10 @@ plotters = "0.3.4"
 itertools = "0.10.5"
 
 [patch.crates-io]
-image = { path = "../image" }
-#image = { git = "https://github.com/oberien/image", branch = "rgb64f" }
-cv = { path = "../cv/cv" }
+#image = { path = "../image" }
+image = { git = "https://github.com/oberien/image", branch = "rgb64f" }
+cv = { git = "https://github.com/oberien/cv" }
+#cv = { path = "../cv/cv" }
 
 [profile.release]
 debug = true

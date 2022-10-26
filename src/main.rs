@@ -99,20 +99,29 @@ fn main() {
         .take(args.num_files)
         .collect();
 
-    let res = files.par_windows(2)
-        .map(|paths| (
-            Reader::open(&paths[0]).unwrap().decode().unwrap().into_rgb64f(),
-            Reader::open(&paths[1]).unwrap().decode().unwrap().into_rgb64f()
-        )).fold(|| Vec::new(), |mut diffs, (left, right)| {
-            let processing_akaze = &[Postprocessing::Maxscale, Postprocessing::Blur(20.), Postprocessing::Sobel(0), Postprocessing::Maxscale, Postprocessing::Akaze(0.001)];
-            let processing_sod = &[Postprocessing::Maxscale, Postprocessing::Blur(20.), Postprocessing::Maxscale, Postprocessing::SingleObjectDetection(0.2)];
-            let processing_aba = &[Postprocessing::Maxscale, Postprocessing::Blur(20.), Postprocessing::Maxscale, Postprocessing::AverageBrightnessAlignment(0.2)];
-            let ref_akaze = registration::prepare_reference_image(left.clone(), files.len(), processing_akaze);
-            let ref_sod = registration::prepare_reference_image(left.clone(), files.len(), processing_sod);
-            let ref_aba = registration::prepare_reference_image(left.clone(), files.len(), processing_aba);
-            let akaze = registration::register(&ref_akaze, right.clone(), files.len(), processing_akaze, false).unwrap_or((0, 0));
-            let sod = registration::register(&ref_sod, right.clone(), files.len(), processing_sod, false).unwrap_or((0, 0));
-            let aba = registration::register(&ref_aba, right.clone(), files.len(), processing_aba, false).unwrap_or((0, 0));
+    let first = Reader::open(&files[0]).unwrap().decode().unwrap().into_rgb64f();
+    let (width, height) = first.dimensions();
+    let num_files = files.len();
+
+    let processing_akaze = &[Postprocessing::Maxscale, Postprocessing::Blur(20.), Postprocessing::Sobel(0), Postprocessing::Maxscale, Postprocessing::Akaze(0.001)];
+    let processing_sod = &[Postprocessing::Maxscale, Postprocessing::Blur(20.), Postprocessing::Maxscale, Postprocessing::SingleObjectDetection(0.2)];
+    let processing_aba = &[Postprocessing::Maxscale, Postprocessing::Blur(20.), Postprocessing::Maxscale, Postprocessing::AverageBrightnessAlignment(0.1)];
+    let ref_akaze = registration::prepare_reference_image(first.clone(), files.len(), processing_akaze);
+    let ref_sod = registration::prepare_reference_image(first.clone(), files.len(), processing_sod);
+    let ref_aba = registration::prepare_reference_image(first.clone(), files.len(), processing_aba);
+
+    let counter = AtomicU32::new(0);
+    let res = files.into_par_iter()
+        .flat_map(|path| Reader::open(path).ok().and_then(|r| r.decode().ok()).map(|i| i.into_rgb64f()))
+        .fold(|| Vec::new(), |mut diffs, right| {
+            let count = counter.fetch_add(1, Ordering::Relaxed);
+            if count % 50 == 0 {
+                println!("{count}");
+            }
+            // let akaze = registration::register(&ref_akaze, right.clone(), num_files, processing_akaze, false).unwrap_or((0, 0));
+            let akaze = (0i32, 0i32);
+            let sod = registration::register(&ref_sod, right.clone(), num_files, processing_sod, false).unwrap_or((0, 0));
+            let aba = registration::register(&ref_aba, right.clone(), num_files, processing_aba, false).unwrap_or((0, 0));
             diffs.push((akaze, sod, aba));
             diffs
         }).reduce(|| Vec::new(), |mut a, b| {
@@ -133,9 +142,9 @@ fn main() {
     root.fill(&WHITE).unwrap();
 
     let mut scatter_ctx = ChartBuilder::on(&root)
-        .x_label_area_size(40)
-        .y_label_area_size(40)
-        .build_cartesian_2d(-maxabsx as f32 -1.0..maxabsx as f32+1.0, -maxabsy as f32-1.0..maxabsy as f32+1.0).unwrap();
+        .x_label_area_size(60)
+        .y_label_area_size(60)
+        .build_cartesian_2d(-maxabsx as f32 -5.0..maxabsx as f32+5.0, maxabsy as f32+5.0..-maxabsy as f32-5.0).unwrap();
     scatter_ctx
         .configure_mesh()
         .disable_x_mesh()
@@ -154,9 +163,6 @@ fn main() {
 
     panic!("done");
 
-    let first = Reader::open(&files[0]).unwrap().decode().unwrap().into_rgb64f();
-    let (width, height) = first.dimensions();
-    let num_files = files.len();
     let reference_image = registration::prepare_reference_image(first, num_files, &args.registration);
 
     println!("Starting stacking.");
