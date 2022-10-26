@@ -127,7 +127,7 @@ pub fn draw_object(buf: &mut Rgb64FImage, object: Object) {
 }
 
 pub fn draw_cross(buf: &mut Rgb64FImage, center: (f32, f32)) {
-    let size = 10.;
+    let size = 20.;
     let left = (center.0 - size, center.1);
     let right = (center.0 + size, center.1);
     let top = (center.0, center.1 - size);

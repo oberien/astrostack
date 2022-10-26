@@ -98,7 +98,7 @@ pub fn register(common: CommonArgs, register: Register) {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct Match {
+pub struct Match {
     left: (f32, f32),
     right: (f32, f32),
     dx: f32,
@@ -119,13 +119,10 @@ impl Match {
     }
 }
 
-pub struct ReferenceImage(Rgb64FImage);
+pub struct ReferenceImage(pub(crate) Rgb64FImage);
 
 pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usize, processing: &[Processing]) -> ReferenceImage {
-    if processing.is_empty() {
-        return ReferenceImage(reference_image);
-    }
-    crate::processing::process(&mut reference_image, num_files, &processing[..processing.len() - 1]);
+    crate::processing::process(&mut reference_image, num_files, &processing);
     ReferenceImage(reference_image)
 }
 
@@ -147,7 +144,7 @@ pub fn register_internal(reference: &ReferenceImage, mut img: Rgb64FImage, num_f
     res.copy_from(&reference.0, 0, 0).unwrap();
     res.copy_from(&img, reference.0.width(), 0).unwrap();
 
-    let mut matches = registration_function(reference, &img, threshold, &mut res);
+    let mut matches = registration_function(reference, &img, threshold, Some(&mut res));
     matches.sort_by(|m1, m2| m1.arc.total_cmp(&m2.arc));
 
     if matches.is_empty() {
@@ -199,7 +196,7 @@ pub fn register_internal(reference: &ReferenceImage, mut img: Rgb64FImage, num_f
     ))
 }
 
-fn akaze(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mut Rgb64FImage) -> Vec<Match> {
+pub fn akaze(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: Option<&mut Rgb64FImage>) -> Vec<Match> {
     let width = reference.0.width();
     let height = reference.0.height();
 
@@ -232,42 +229,53 @@ fn akaze(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mu
         dist < (width + height) as f32 / 2. / 20.
     });
 
-    for &kp in &kps1 {
-        crate::helpers::akaze_draw_kp(res, kp);
-    }
-    for &kp2 in &kps2 {
-        let kp2 = KeyPoint { point: (kp2.point.0 + width as f32, kp2.point.1), ..kp2 };
-        crate::helpers::akaze_draw_kp(res, kp2);
-    }
-    for &(kp1, kp2) in &matches {
-        let kp2 = KeyPoint { point: (kp2.point.0 + width as f32, kp2.point.1), ..kp2 };
-        imageproc::drawing::draw_line_segment_mut(res, kp1.point, kp2.point, Rgb([1.,0.,0.]));
+    let mut matches: Vec<_> = matches.into_iter().map(|(kp1, kp2)| Match::new(kp1.point, kp2.point)).collect();
+    // reject everything deviating >5° from the median
+    matches.sort_by(|m1, m2| m1.arc.total_cmp(&m2.arc));
+    let median_arcdeg = matches[matches.len() / 2].arcdeg;
+    matches.retain(|m| (median_arcdeg - m.arcdeg).abs() <= 5);
+
+    if let Some(res) = res {
+        for &kp in &kps1 {
+            helpers::akaze_draw_kp(res, kp);
+        }
+        for &kp2 in &kps2 {
+            let kp2 = KeyPoint { point: (kp2.point.0 + width as f32, kp2.point.1), ..kp2 };
+            helpers::akaze_draw_kp(res, kp2);
+        }
+        for &Match { left, right, .. } in &matches {
+            let right = (right.0 + width as f32, right.1);
+            imageproc::drawing::draw_line_segment_mut(res, left, right, Rgb([1.,0.,0.]));
+        }
     }
 
-    matches.into_iter().map(|(kp1, kp2)| Match::new(kp1.point, kp2.point)).collect()
+    matches
 }
 
-fn single_object_detection(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mut Rgb64FImage) -> Vec<Match> {
+pub fn single_object_detection(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: Option<&mut Rgb64FImage>) -> Vec<Match> {
     let o1 = helpers::single_object_detection(&reference.0, threshold);
     let o2 = helpers::single_object_detection(img, threshold);
     // reject everything with more than 2% diff from the reference image
-    let dwidth = (o1.width as f32 / o2.width as f32 - 1.).abs();
-    let dheight = (o1.height as f32 / o2.height as f32 - 1.).abs();
-    if dwidth > 0.02 || dheight > 0.02 {
-        return Vec::new();
-    }
+    // let dwidth = (o1.width as f32 / o2.width as f32 - 1.).abs();
+    // let dheight = (o1.height as f32 / o2.height as f32 - 1.).abs();
+    // if dwidth > 0.02 || dheight > 0.02 {
+    //     return Vec::new();
+    // }
 
-    let o2right = Object {
-        left: o2.left + reference.0.width(),
-        right: o2.right + reference.0.width(),
-        top: o2.top,
-        bottom: o2.bottom,
-        middle: (o2.middle.0 + reference.0.width(), o2.middle.1),
-        width: o2.width,
-        height: o2.height,
-    };
-    helpers::draw_object(res, o1);
-    helpers::draw_object(res, o2right);
+    if let Some(res) = res {
+        let o2right = Object {
+            left: o2.left + reference.0.width(),
+            right: o2.right + reference.0.width(),
+            top: o2.top,
+            bottom: o2.bottom,
+            middle: (o2.middle.0 + reference.0.width(), o2.middle.1),
+            width: o2.width,
+            height: o2.height,
+        };
+        helpers::draw_object(res, o1);
+        helpers::draw_object(res, o2right);
+        imageproc::drawing::draw_line_segment_mut(res, (o1.middle.0 as f32, o1.middle.1 as f32), (o2right.middle.0 as f32, o2right.middle.1 as f32), Rgb([1., 0., 0.]));
+    }
 
     vec![Match::new(
         (o1.middle.0 as f32, o1.middle.1 as f32),
@@ -275,15 +283,24 @@ fn single_object_detection(reference: &ReferenceImage, img: &Rgb64FImage, thresh
     )]
 }
 
-fn average_brightness_alignment(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: &mut Rgb64FImage) -> Vec<Match> {
+pub fn average_brightness_alignment(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: Option<&mut Rgb64FImage>) -> Vec<Match> {
     let (leftx, lefty) = helpers::average_brightness(&reference.0, threshold);
     let (rightx, righty) = helpers::average_brightness(img, threshold);
+    let (leftx, lefty, rightx, righty) = (leftx as f32, lefty as f32, rightx as f32, righty as f32);
 
-    helpers::draw_cross(res, (leftx as f32, lefty as f32));
-    helpers::draw_cross(res, ((rightx + reference.0.width() as f64) as f32, righty as f32));
+    if let Some(res) = res {
+        let w = reference.0.width() as f32;
+        helpers::draw_cross(res, (leftx, lefty));
+        helpers::draw_cross(res, ((rightx + w), righty));
+        imageproc::drawing::draw_line_segment_mut(res, (leftx, lefty), (rightx + w, righty), Rgb([1., 0., 0.]));
+    }
 
     vec![Match::new(
         (leftx as f32, lefty as f32),
         (rightx as f32, righty as f32),
     )]
+}
+
+pub fn noop(_reference: &ReferenceImage, _img: &Rgb64FImage, _threshold: f64, _res: Option<&mut Rgb64FImage>) -> Vec<Match> {
+    vec![Match::new((0., 0.), (0., 0.))]
 }

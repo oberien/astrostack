@@ -54,9 +54,25 @@ pub struct Process {
 
 #[derive(Debug, Args)]
 pub struct Compare {
-    #[arg(short = 'i', long, default_value = "registration_data.json")]
-    registration_input: PathBuf,
-    #[arg(short = 'o', long, default_value = "compare")]
+    first: PathBuf,
+    second: PathBuf,
+    #[arg(
+        long = "pa", long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        default_value = "maxscale,blur=20,sobel=0,maxscale",
+    )]
+    preprocessing_akaze: Vec<Processing>,
+    #[arg(
+        long = "pr", long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        default_value = "maxscale,blur=20,maxscale",
+    )]
+    preprocessing_rest: Vec<Processing>,
+    #[arg(long, default_value_t = 0.001)]
+    akaze: f64,
+    #[arg(long, long = "sod", default_value_t = 0.2)]
+    single_object_detection: f64,
+    #[arg(long, long = "aba", default_value_t = 0.2)]
+    average_brightness_alignment: f64,
+    #[arg(short = 'o', long, default_value = "compared")]
     outfile_prefix: PathBuf,
 }
 
