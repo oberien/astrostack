@@ -17,7 +17,7 @@ use crate::{CommonArgs, helpers, Processing, Register};
 
 pub fn register(common: CommonArgs, register: Register) {
     let CommonArgs { colorspace, num_files, skip_files } = common;
-    let Register { imagepaths, preprocessing_akaze, preprocessing_rest, outfile, akaze, single_object_detection, average_brightness_alignment } = register;
+    let Register { imagepaths, reference_image, preprocessing_akaze, preprocessing_rest, outfile, akaze, single_object_detection, average_brightness_alignment } = register;
 
     let mut files: Vec<_> = imagepaths.into_iter()
         .flat_map(|path| {
@@ -35,16 +35,15 @@ pub fn register(common: CommonArgs, register: Register) {
         .take(num_files)
         .collect();
 
-    let first = Reader::open(&files[0]).unwrap().decode().unwrap().into_rgb64f();
-    let (width, height) = first.dimensions();
-    let num_files = files.len();
+    let reference_image = Reader::open(&files[reference_image]).unwrap().decode().unwrap().into_rgb64f();
+    let (width, height) = reference_image.dimensions();
 
     let processing_akaze = &[Processing::Maxscale, Processing::Blur(20.), Processing::Sobel(0), Processing::Maxscale, Processing::Akaze(0.001)];
     let processing_sod = &[Processing::Maxscale, Processing::Blur(20.), Processing::Maxscale, Processing::SingleObjectDetection(0.2)];
     let processing_aba = &[Processing::Maxscale, Processing::Blur(20.), Processing::Maxscale, Processing::AverageBrightnessAlignment(0.1)];
-    let ref_akaze = prepare_reference_image(first.clone(), files.len(), processing_akaze);
-    let ref_sod = prepare_reference_image(first.clone(), files.len(), processing_sod);
-    let ref_aba = prepare_reference_image(first.clone(), files.len(), processing_aba);
+    let ref_akaze = prepare_reference_image(reference_image.clone(), files.len(), processing_akaze);
+    let ref_sod = prepare_reference_image(reference_image.clone(), files.len(), processing_sod);
+    let ref_aba = prepare_reference_image(reference_image.clone(), files.len(), processing_aba);
 
     let counter = AtomicU32::new(0);
     let res = files.into_par_iter()
@@ -126,7 +125,7 @@ pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usiz
     if processing.is_empty() {
         return ReferenceImage(reference_image);
     }
-    crate::postprocessing::process(&mut reference_image, num_files, &processing[..processing.len() - 1]);
+    crate::processing::process(&mut reference_image, num_files, &processing[..processing.len() - 1]);
     ReferenceImage(reference_image)
 }
 
@@ -140,7 +139,7 @@ pub fn register_internal(reference: &ReferenceImage, mut img: Rgb64FImage, num_f
     };
     processing = &processing[..processing.len()-1];
 
-    crate::postprocessing::process(&mut img, num_files, &processing);
+    crate::processing::process(&mut img, num_files, &processing);
 
     assert_eq!(reference.0.width(), img.width());
     assert_eq!(reference.0.height(), img.height());

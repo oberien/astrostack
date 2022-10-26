@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use clap::{builder::ValueParser, Parser, ValueEnum, Args, Subcommand};
 
 mod helpers;
-mod postprocessing;
+mod processing;
 mod colorspace;
-mod register;
+mod process;
 mod compare;
+mod register;
 mod video;
 mod stack;
 
@@ -30,22 +31,50 @@ pub struct CommonArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Register(Register),
+    /// Apply a process-chain to a single image
+    Process(Process),
+    /// Output comparison of two images as will be done during registration
     Compare(Compare),
+    /// Register images
+    Register(Register),
+    /// Create a video from the aligned registered images
     Video(Video),
+    /// Stack registered images
     Stack(Stack),
+}
+
+#[derive(Debug, Args)]
+pub struct Process {
+    image: PathBuf,
+    #[arg(short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
+    processing: Vec<Processing>,
+    #[arg(short = 'o', long, default_value = "processed.png")]
+    outfile: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct Compare {
+    #[arg(short = 'i', long, default_value = "registration_data.json")]
+    registration_input: PathBuf,
+    #[arg(short = 'o', long, default_value = "compare")]
+    outfile_prefix: PathBuf,
 }
 
 #[derive(Debug, Args)]
 pub struct Register {
     #[arg(short = 'i', long)]
     imagepaths: Vec<PathBuf>,
+    #[arg(short = 'r', long)]
+    reference_image: usize,
     #[arg(
         long = "pa", long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
-        default_value = "maxscale,blur=20,maxscale",
+        default_value = "maxscale,blur=20,sobel=0,maxscale",
     )]
     preprocessing_akaze: Vec<Processing>,
-    #[arg(long = "pr", long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
+    #[arg(
+        long = "pr", long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        default_value = "maxscale,blur=20,maxscale",
+    )]
     preprocessing_rest: Vec<Processing>,
     #[arg(short = 'o', long, default_value = "registration_data.json")]
     outfile: PathBuf,
@@ -58,16 +87,8 @@ pub struct Register {
 }
 
 #[derive(Debug, Args)]
-pub struct Compare {
-    #[arg(short = 'i', long)]
-    registration_input: PathBuf,
-    #[arg(short = 'o', long, default_value = "compare")]
-    outfile_prefix: PathBuf,
-}
-
-#[derive(Debug, Args)]
 pub struct Video {
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, default_value = "registration_data.json")]
     registration_input: PathBuf,
     #[arg(short = 'o', long, default_value = "video_aligned")]
     outfile_prefix: PathBuf,
@@ -75,7 +96,7 @@ pub struct Video {
 
 #[derive(Debug, Args)]
 pub struct Stack {
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, default_value = "registration_data.json")]
     registration_input: PathBuf,
     #[arg(short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
     postprocessing: Vec<Processing>,
@@ -117,16 +138,12 @@ fn main() {
     dbg!(&args);
 
     match args.command {
+        Command::Process(proc) => process::process(args.common, proc),
         Command::Register(reg) => register::register(args.common, reg),
         Command::Compare(cmp) => compare::compare(args.common, cmp),
         Command::Video(video) => video::video(args.common, video),
         Command::Stack(stack) => stack::stack(args.common, stack),
     }
-
-
-
-    panic!("done");
-
 }
 
 fn parse_postprocessing(p: &str) -> Result<Processing, String> {

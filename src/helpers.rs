@@ -1,7 +1,24 @@
+use std::path::Path;
 use cv::bitarray::BitArray;
 use cv::feature::akaze::{Akaze, KeyPoint};
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb64FImage};
 use image::buffer::ConvertBuffer;
+use image::io::Reader;
+use crate::Colorspace;
+
+pub fn load_image<P: AsRef<Path>>(path: P, colorspace: Colorspace) -> Rgb64FImage {
+    let mut img = Reader::open(path).unwrap().decode().unwrap().into_rgb64f();
+    for px in img.pixels_mut() {
+        *px = colorspace.convert_into(*px);
+    }
+    img
+}
+pub fn save_image<P: AsRef<Path>>(mut img: Rgb64FImage, path: P, colorspace: Colorspace) {
+    for pixel in img.pixels_mut() {
+        *pixel = colorspace.convert_back(*pixel);
+    }
+    DynamicImage::ImageRgb64F(img).into_rgb16().save(path).unwrap();
+}
 
 // from https://github.com/dangreco/edgy/blob/master/src/main.rs
 pub fn edgy_sobel(image: &DynamicImage, blur_modifier: i32) -> ImageBuffer<Luma<u8>, Vec<u8>> {

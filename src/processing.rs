@@ -1,18 +1,18 @@
 use image::{DynamicImage, Rgb, Rgb64FImage};
 use crate::{helpers, Processing};
 
-pub fn process(buf: &mut Rgb64FImage, num_files: usize, postprocessing: &[Processing]) {
-    for postprocess in postprocessing {
+pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing]) {
+    for postprocess in processing {
         match postprocess {
             Processing::Average => average(buf, num_files),
             Processing::Maxscale => maxscale(buf),
             Processing::Sqrt => sqrt(buf),
             Processing::Asinh => asinh(buf),
-            &Processing::Akaze(threshold) => akaze_draw(buf, threshold),
             &Processing::Sobel(blur) => sobel(buf, blur),
             &Processing::Blur(sigma) => gaussian_blur(buf, sigma),
             &Processing::BGone(threshold) => background_extract(buf, threshold),
             &Processing::BlackWhite(threshold) => black_while(buf, threshold),
+            &Processing::Akaze(threshold) => akaze_draw(buf, threshold),
             &Processing::SingleObjectDetection(threshold) => single_object_detection(buf, threshold),
             &Processing::AverageBrightnessAlignment(threshold) => average_brightness_alignment(buf, threshold),
         }
