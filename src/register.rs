@@ -1,14 +1,102 @@
 use std::f32::consts::PI;
+use std::sync::atomic::{AtomicU32, Ordering};
 use cv::feature::akaze::KeyPoint;
+use either::Either;
 use image::{DynamicImage, GenericImage, ImageBuffer, Rgb, Rgb64FImage};
+use image::io::Reader;
 use itertools::Itertools;
 use plotters::backend::BitMapBackend;
 use plotters::chart::ChartBuilder;
 use plotters::drawing::IntoDrawingArea;
+use plotters::element::Circle;
 use plotters::series::Histogram;
-use plotters::style::{Color, RED, WHITE};
+use plotters::style::{BLUE, Color, GREEN, RED, WHITE};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use crate::helpers::Object;
-use crate::{helpers, Postprocessing};
+use crate::{CommonArgs, helpers, Processing, Register};
+
+pub fn register(common: CommonArgs, register: Register) {
+    let CommonArgs { colorspace, num_files, skip_files } = common;
+    let Register { imagepaths, preprocessing_akaze, preprocessing_rest, outfile, akaze, single_object_detection, average_brightness_alignment } = register;
+
+    let mut files: Vec<_> = imagepaths.into_iter()
+        .flat_map(|path| {
+            if path.is_dir() {
+                Either::Left(path.read_dir().unwrap().map(|entry| entry.unwrap().path()))
+            } else if path.is_file() {
+                Either::Right([path].into_iter())
+            } else {
+                panic!("input path {} is neither directory nor file", path.display())
+            }
+        }).collect();
+    files.sort_by_key(|path| path.file_name().unwrap().to_owned());
+    let files: Vec<_> = files.into_iter()
+        .skip(skip_files)
+        .take(num_files)
+        .collect();
+
+    let first = Reader::open(&files[0]).unwrap().decode().unwrap().into_rgb64f();
+    let (width, height) = first.dimensions();
+    let num_files = files.len();
+
+    let processing_akaze = &[Processing::Maxscale, Processing::Blur(20.), Processing::Sobel(0), Processing::Maxscale, Processing::Akaze(0.001)];
+    let processing_sod = &[Processing::Maxscale, Processing::Blur(20.), Processing::Maxscale, Processing::SingleObjectDetection(0.2)];
+    let processing_aba = &[Processing::Maxscale, Processing::Blur(20.), Processing::Maxscale, Processing::AverageBrightnessAlignment(0.1)];
+    let ref_akaze = prepare_reference_image(first.clone(), files.len(), processing_akaze);
+    let ref_sod = prepare_reference_image(first.clone(), files.len(), processing_sod);
+    let ref_aba = prepare_reference_image(first.clone(), files.len(), processing_aba);
+
+    let counter = AtomicU32::new(0);
+    let res = files.into_par_iter()
+        .flat_map(|path| Reader::open(path).ok().and_then(|r| r.decode().ok()).map(|i| i.into_rgb64f()))
+        .fold(|| Vec::new(), |mut diffs, right| {
+            let count = counter.fetch_add(1, Ordering::Relaxed);
+            if count % 50 == 0 {
+                println!("{count}");
+            }
+            // let akaze = register_inetrnal(&ref_akaze, right.clone(), num_files, processing_akaze, false).unwrap_or((0, 0));
+            let akaze = (0i32, 0i32);
+            let sod = register_internal(&ref_sod, right.clone(), num_files, processing_sod, false).unwrap_or((0, 0));
+            let aba = register_internal(&ref_aba, right.clone(), num_files, processing_aba, false).unwrap_or((0, 0));
+            diffs.push((akaze, sod, aba));
+            diffs
+        }).reduce(|| Vec::new(), |mut a, b| {
+        a.extend(b);
+        a
+    });
+
+    let (maxabsx, maxabsy) = res.iter().copied()
+        .fold((i32::MIN, i32::MIN), |(maxabsx, maxabsy), diff| {
+            let ((dx1, dy1), (dx2, dy2), (dx3, dy3)) = diff;
+            (
+                maxabsx.max(dx1.abs()).max(dx2.abs()).max(dx3.abs()),
+                maxabsy.max(dy1.abs()).max(dy2.abs()).max(dy3.abs()),
+            )
+        });
+
+    let root = BitMapBackend::new("registration-scatter.png", (1920, 1080)).into_drawing_area();
+    root.fill(&WHITE).unwrap();
+
+    let mut scatter_ctx = ChartBuilder::on(&root)
+        .x_label_area_size(60)
+        .y_label_area_size(60)
+        .build_cartesian_2d(-maxabsx as f32 -5.0..maxabsx as f32+5.0, maxabsy as f32+5.0..-maxabsy as f32-5.0).unwrap();
+    scatter_ctx
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .draw().unwrap();
+    scatter_ctx.draw_series(
+        res.iter().copied()
+            .flat_map(|(a, b, c)| [
+                ((a.0 as f32, a.1 as f32), RED),
+                ((b.0 as f32 + 0.3, b.1 as f32), GREEN),
+                ((c.0 as f32, c.1 as f32 + 0.3), BLUE),
+            ]).map(|((x, y), col)| Circle::new((x, y), 2, col.filled())),
+    ).unwrap();
+
+    root.present().unwrap();
+}
 
 #[derive(Debug, Copy, Clone)]
 struct Match {
@@ -34,7 +122,7 @@ impl Match {
 
 pub struct ReferenceImage(Rgb64FImage);
 
-pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usize, processing: &[Postprocessing]) -> ReferenceImage {
+pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usize, processing: &[Processing]) -> ReferenceImage {
     if processing.is_empty() {
         return ReferenceImage(reference_image);
     }
@@ -42,12 +130,12 @@ pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usiz
     ReferenceImage(reference_image)
 }
 
-pub fn register(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usize, mut processing: &[Postprocessing], debug: bool) -> Option<(i32, i32)> {
+pub fn register_internal(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usize, mut processing: &[Processing], debug: bool) -> Option<(i32, i32)> {
     let (registration_function, threshold): (fn(_, _, _, _) -> Vec<Match>, _) = match processing.last() {
         None => return Some((0, 0)),
-        Some(&Postprocessing::Akaze(threshold)) => (akaze, threshold),
-        Some(&Postprocessing::SingleObjectDetection(threshold)) => (single_object_detection, threshold),
-        Some(&Postprocessing::AverageBrightnessAlignment(threshold)) => (average_brightness_alignment, threshold),
+        Some(&Processing::Akaze(threshold)) => (akaze, threshold),
+        Some(&Processing::SingleObjectDetection(threshold)) => (single_object_detection, threshold),
+        Some(&Processing::AverageBrightnessAlignment(threshold)) => (average_brightness_alignment, threshold),
         _ => unreachable!(),
     };
     processing = &processing[..processing.len()-1];

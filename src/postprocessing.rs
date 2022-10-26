@@ -1,20 +1,20 @@
 use image::{DynamicImage, Rgb, Rgb64FImage};
-use crate::{helpers, Postprocessing};
+use crate::{helpers, Processing};
 
-pub fn process(buf: &mut Rgb64FImage, num_files: usize, postprocessing: &[Postprocessing]) {
+pub fn process(buf: &mut Rgb64FImage, num_files: usize, postprocessing: &[Processing]) {
     for postprocess in postprocessing {
         match postprocess {
-            Postprocessing::Average => average(buf, num_files),
-            Postprocessing::Maxscale => maxscale(buf),
-            Postprocessing::Sqrt => sqrt(buf),
-            Postprocessing::Asinh => asinh(buf),
-            &Postprocessing::Akaze(threshold) => akaze_draw(buf, threshold),
-            &Postprocessing::Sobel(blur) => sobel(buf, blur),
-            &Postprocessing::Blur(sigma) => gaussian_blur(buf, sigma),
-            &Postprocessing::BGone(threshold) => background_extract(buf, threshold),
-            &Postprocessing::BlackWhite(threshold) => black_while(buf, threshold),
-            &Postprocessing::SingleObjectDetection(threshold) => single_object_detection(buf, threshold),
-            &Postprocessing::AverageBrightnessAlignment(threshold) => average_brightness_alignment(buf, threshold),
+            Processing::Average => average(buf, num_files),
+            Processing::Maxscale => maxscale(buf),
+            Processing::Sqrt => sqrt(buf),
+            Processing::Asinh => asinh(buf),
+            &Processing::Akaze(threshold) => akaze_draw(buf, threshold),
+            &Processing::Sobel(blur) => sobel(buf, blur),
+            &Processing::Blur(sigma) => gaussian_blur(buf, sigma),
+            &Processing::BGone(threshold) => background_extract(buf, threshold),
+            &Processing::BlackWhite(threshold) => black_while(buf, threshold),
+            &Processing::SingleObjectDetection(threshold) => single_object_detection(buf, threshold),
+            &Processing::AverageBrightnessAlignment(threshold) => average_brightness_alignment(buf, threshold),
         }
     }
 }
