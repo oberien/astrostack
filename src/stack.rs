@@ -22,10 +22,11 @@ pub fn stack(common: CommonArgs, stack: Stack) {
     let images = &registration.images[skip_files..][..num_files];
 
     let creation_fn = || {
-        let img = Rgb64FImage::new(width*3, height*3);
+        let img = Rgb64FImage::new(width, height);
         (img.clone(), img.clone(), img.clone())
     };
 
+    println!("Starting Stacking");
     let counter = AtomicU32::new(0);
     let (mut akaze, mut sod, mut aba) = images.par_iter()
         .map(|reg| (helpers::load_image(&reg.image, colorspace), reg))
@@ -38,7 +39,7 @@ pub fn stack(common: CommonArgs, stack: Stack) {
             // akaze
             match reg.akaze {
                 Some(AkazeRegistration::Offset(dx, dy)) => {
-                    stack_into(&mut akaze, &image, dx as i32 + width as i32, dy as i32 + height as i32);
+                    stack_into(&mut akaze, &image, dx as i32, dy as i32);
                 }
                 Some(AkazeRegistration::Rejected) => println!("rejected akaze {count:05}"),
                 None => (),
@@ -47,14 +48,14 @@ pub fn stack(common: CommonArgs, stack: Stack) {
             // sod
             if !reg.sod.should_reject(&reference_image.sod) {
                 let (dx, dy) = reg.sod.offset(&reference_image.sod);
-                stack_into(&mut sod, &image, dx + width as i32, dy + height as i32);
+                stack_into(&mut sod, &image, dx, dy);
             } else {
                 println!("rejected sod {count:05}");
             }
 
             // aba
             let (dx, dy) = reg.aba.offset(&reference_image.aba);
-            stack_into(&mut aba, &image, dx + width as i32, dy + height as i32);
+            stack_into(&mut aba, &image, dx, dy);
             (akaze, sod, aba)
         }).reduce(creation_fn, |(mut akaze1, mut sod1, mut aba1), (akaze2, sod2, aba2)| {
             stack_into(&mut akaze1, &akaze2, 0, 0);
@@ -82,7 +83,10 @@ pub fn stack_into(buf: &mut Rgb64FImage, img: &Rgb64FImage, dx: i32, dy: i32) {
     for (x, y, &pixel) in img.enumerate_pixels() {
         let bufx = (x as i32 + dx) as u32;
         let bufy = (y as i32 + dy) as u32;
-        let bufpx = buf.get_pixel_mut(bufx, bufy);
+        let bufpx = match buf.get_pixel_mut_checked(bufx, bufy) {
+            Some(px) => px,
+            None => continue,
+        };
         bufpx.0[0] += pixel.0[0];
         bufpx.0[1] += pixel.0[1];
         bufpx.0[2] += pixel.0[2];

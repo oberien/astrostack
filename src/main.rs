@@ -80,7 +80,7 @@ pub struct Compare {
 pub struct Register {
     #[arg(short = 'i', long)]
     imagepaths: Vec<PathBuf>,
-    #[arg(short = 'r', long)]
+    #[arg(short = 'r', long, default_value_t = 0)]
     reference_image: usize,
     #[arg(
         long = "pa", long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
@@ -114,7 +114,10 @@ pub struct Video {
 pub struct Stack {
     #[arg(short = 'i', long, default_value = "registration_data.json")]
     registration_input: PathBuf,
-    #[arg(short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
+    #[arg(
+        short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        default_value = "maxscale",
+    )]
     postprocessing: Vec<Processing>,
     #[arg(short = 'o', long, default_value = "stacked")]
     outfile_prefix: PathBuf,
