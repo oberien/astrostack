@@ -37,8 +37,7 @@ pub fn compare(common: CommonArgs, compare: Compare) {
         res.copy_from(&second, first.width(), 0).unwrap();
 
         register(&first, &second, threshold, &mut res, &outfile_prefix);
-        let outfile_name = format!("{}_{}.png", outfile_prefix.file_name().unwrap().to_str().unwrap(), name);
-        let outfile = outfile_prefix.with_file_name(outfile_name);
+        let outfile = helpers::path_with_suffix(&outfile_prefix, &format!("{name}.png"));
         helpers::save_image(res, outfile, colorspace);
     }
 }
@@ -52,8 +51,7 @@ fn akaze(left: &Rgb64FImage, right: &Rgb64FImage, threshold: f64, res: &mut Rgb6
 
     // arc statistics
 
-    let outfile_name = format!("{}_akaze_arcs.png", outfile_prefix.file_name().unwrap().to_str().unwrap());
-    let outfile = outfile_prefix.with_file_name(outfile_name);
+    let outfile = helpers::path_with_suffix(outfile_prefix, "akaze_arcs.png");
     let max_frequency = matches_unrejected.iter().dedup_by_with_count(|m1, m2| m1.arcdeg() == m2.arcdeg())
         .map(|(count, _arc)| count)
         .max().unwrap();

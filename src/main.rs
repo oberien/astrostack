@@ -116,8 +116,8 @@ pub struct Stack {
     registration_input: PathBuf,
     #[arg(short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',')]
     postprocessing: Vec<Processing>,
-    #[arg(short = 'o', long, default_value = "stacked.png")]
-    outfile: PathBuf,
+    #[arg(short = 'o', long, default_value = "stacked")]
+    outfile_prefix: PathBuf,
 }
 
 #[derive(Debug, Copy, Clone, ValueEnum)]

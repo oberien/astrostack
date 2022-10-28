@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use cv::feature::akaze::KeyPoint;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb64FImage};
 use image::io::Reader;
@@ -25,6 +25,11 @@ pub fn load_registration<P: AsRef<Path>>(path: P) -> Registration {
 }
 pub fn save_registration<P: AsRef<Path>>(path: P, registration: &Registration) {
     serde_json::to_writer(File::create(path).unwrap(), registration).unwrap();
+}
+
+pub fn path_with_suffix<P: AsRef<Path>>(prefix: P, suffix: &str) -> PathBuf {
+    let file_name = format!("{}_{}", prefix.as_ref().file_name().unwrap().to_str().unwrap(), suffix);
+    prefix.as_ref().with_file_name(file_name)
 }
 
 // from https://github.com/dangreco/edgy/blob/master/src/main.rs

@@ -10,11 +10,10 @@ use plotters::backend::BitMapBackend;
 use plotters::chart::ChartBuilder;
 use plotters::drawing::IntoDrawingArea;
 use plotters::element::Circle;
-use plotters::series::Histogram;
 use plotters::style::{BLUE, Color, GREEN, RED, WHITE};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Serialize, Deserialize};
-use crate::{CommonArgs, helpers, Processing, processing, Register};
+use crate::{CommonArgs, helpers, processing, Register};
 
 pub fn register(common: CommonArgs, register: Register) {
     let CommonArgs { colorspace, num_files, skip_files } = common;
@@ -137,6 +136,12 @@ impl SodRegistration {
         let (x2, y2) = self.middle();
         (x1 as i32 - x2 as i32, y1 as i32 - y2 as i32)
     }
+    pub fn should_reject(&self, reference: &SodRegistration) -> bool {
+        // reject everything with more than 2% diff from the reference image
+        let dwidth = (self.width() as f32 / reference.width() as f32 - 1.).abs();
+        let dheight = (self.height() as f32 / reference.height() as f32 - 1.).abs();
+        dwidth > 0.02 || dheight > 0.02
+    }
 }
 impl AbaRegistration {
     pub fn offset(&self, reference: &AbaRegistration) -> (i32, i32) {
@@ -182,16 +187,6 @@ fn statistics(reg: &Registration) {
     ).unwrap();
 
     root.present().unwrap();
-}
-
-fn reject() {
-    // sod
-    // reject everything with more than 2% diff from the reference image
-    // let dwidth = (o1.width as f32 / o2.width as f32 - 1.).abs();
-    // let dheight = (o1.height as f32 / o2.height as f32 - 1.).abs();
-    // if dwidth > 0.02 || dheight > 0.02 {
-    //     return Vec::new();
-    // }
 }
 
 #[derive(Debug, Clone)]
