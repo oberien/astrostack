@@ -1,10 +1,10 @@
+use std::fs::File;
 use std::path::Path;
-use cv::bitarray::BitArray;
-use cv::feature::akaze::{Akaze, KeyPoint};
+use cv::feature::akaze::KeyPoint;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb64FImage};
-use image::buffer::ConvertBuffer;
 use image::io::Reader;
 use crate::Colorspace;
+use crate::register::{Registration, SodRegistration};
 
 pub fn load_image<P: AsRef<Path>>(path: P, colorspace: Colorspace) -> Rgb64FImage {
     let mut img = Reader::open(path).unwrap().decode().unwrap().into_rgb64f();
@@ -18,6 +18,13 @@ pub fn save_image<P: AsRef<Path>>(mut img: Rgb64FImage, path: P, colorspace: Col
         *pixel = colorspace.convert_back(*pixel);
     }
     DynamicImage::ImageRgb64F(img).into_rgb16().save(path).unwrap();
+}
+
+pub fn load_registration<P: AsRef<Path>>(path: P) -> Registration {
+    serde_json::from_reader(File::open(path).unwrap()).unwrap()
+}
+pub fn save_registration<P: AsRef<Path>>(path: P, registration: &Registration) {
+    serde_json::to_writer(File::create(path).unwrap(), registration).unwrap();
 }
 
 // from https://github.com/dangreco/edgy/blob/master/src/main.rs
@@ -57,71 +64,11 @@ pub fn edgy_sobel(image: &DynamicImage, blur_modifier: i32) -> ImageBuffer<Luma<
     buff
 }
 
-pub fn akaze(buf: &Rgb64FImage, threshold: f64) -> (Vec<KeyPoint>, Vec<BitArray<64>>) {
-    let detector = Akaze::new(threshold);
-    let luma16: ImageBuffer<Luma<u16>, Vec<u16>> = buf.convert();
-    detector.extract(&DynamicImage::ImageLuma16(luma16))
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct Object {
-    pub left: u32,
-    pub right: u32,
-    pub top: u32,
-    pub bottom: u32,
-    pub middle: (u32, u32),
-    pub width: u32,
-    pub height: u32,
-}
-
-pub fn single_object_detection(buf: &Rgb64FImage, threshold: f64) -> Object {
-    let mut left = u32::MAX;
-    let mut right = 0;
-    let mut top = u32::MAX;
-    let mut bottom = 0;
-    for (x, y, pixel) in buf.enumerate_pixels() {
-        let value = pixel.0.into_iter().sum::<f64>() / 3.;
-        if value >= threshold {
-            left = x.min(left);
-            right = x.max(right);
-            top = y.min(top);
-            bottom = y.max(bottom);
-        }
-    }
-    let middlex = left + (right - left) / 2;
-    let middley = top + (bottom - top) / 2;
-    Object {
-        left, right, top, bottom,
-        middle: (middlex, middley),
-        width: right - left,
-        height: bottom - top,
-    }
-}
-
-pub fn average_brightness(buf: &Rgb64FImage, threshold: f64) -> (f64, f64) {
-    let mut sum = 0.0;
-    let mut weighted_sum_rows = 0.0;
-    let mut weighted_sum_columns = 0.0;
-
-    for (x, y, pixel) in buf.enumerate_pixels() {
-        let value = pixel.0.into_iter().sum::<f64>() / 3.;
-        if value < threshold {
-            continue;
-        }
-        sum += value;
-        weighted_sum_rows += y as f64 * value;
-        weighted_sum_columns += x as f64 * value;
-    }
-    let middlex = weighted_sum_columns / sum;
-    let middley = weighted_sum_rows / sum;
-    (middlex, middley)
-}
-
-pub fn draw_object(buf: &mut Rgb64FImage, object: Object) {
-    let left = (object.left as f32, object.middle.1 as f32);
-    let right = (object.right as f32, object.middle.1 as f32);
-    let top = (object.middle.0 as f32, object.top as f32);
-    let bottom = (object.middle.0 as f32, object.bottom as f32);
+pub fn draw_object(buf: &mut Rgb64FImage, sod: SodRegistration) {
+    let left = (sod.left as f32, sod.middle().1 as f32);
+    let right = (sod.right as f32, sod.middle().1 as f32);
+    let top = (sod.middle().0 as f32, sod.top as f32);
+    let bottom = (sod.middle().0 as f32, sod.bottom as f32);
     imageproc::drawing::draw_line_segment_mut(buf, left, right, Rgb([1., 0., 0.]));
     imageproc::drawing::draw_line_segment_mut(buf, top, bottom, Rgb([1., 0., 0.]));
 }

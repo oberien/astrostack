@@ -1,10 +1,11 @@
 use std::f32::consts::PI;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
-use cv::feature::akaze::KeyPoint;
+use cv::bitarray::BitArray;
+use cv::feature::akaze::{Akaze, KeyPoint};
 use either::Either;
-use image::{DynamicImage, GenericImage, ImageBuffer, Rgb, Rgb64FImage};
-use image::io::Reader;
-use itertools::Itertools;
+use image::{DynamicImage, ImageBuffer, Luma, Rgb64FImage};
+use image::buffer::ConvertBuffer;
 use plotters::backend::BitMapBackend;
 use plotters::chart::ChartBuilder;
 use plotters::drawing::IntoDrawingArea;
@@ -12,8 +13,8 @@ use plotters::element::Circle;
 use plotters::series::Histogram;
 use plotters::style::{BLUE, Color, GREEN, RED, WHITE};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use crate::helpers::Object;
-use crate::{CommonArgs, helpers, Processing, Register};
+use serde::{Serialize, Deserialize};
+use crate::{CommonArgs, helpers, Processing, processing, Register};
 
 pub fn register(common: CommonArgs, register: Register) {
     let CommonArgs { colorspace, num_files, skip_files } = common;
@@ -35,38 +36,121 @@ pub fn register(common: CommonArgs, register: Register) {
         .take(num_files)
         .collect();
 
-    let reference_image = Reader::open(&files[reference_image]).unwrap().decode().unwrap().into_rgb64f();
-    let (width, height) = reference_image.dimensions();
-
-    let processing_akaze = &[Processing::Maxscale, Processing::Blur(20.), Processing::Sobel(0), Processing::Maxscale, Processing::Akaze(0.001)];
-    let processing_sod = &[Processing::Maxscale, Processing::Blur(20.), Processing::Maxscale, Processing::SingleObjectDetection(0.2)];
-    let processing_aba = &[Processing::Maxscale, Processing::Blur(20.), Processing::Maxscale, Processing::AverageBrightnessAlignment(0.1)];
-    let ref_akaze = prepare_reference_image(reference_image.clone(), files.len(), processing_akaze);
-    let ref_sod = prepare_reference_image(reference_image.clone(), files.len(), processing_sod);
-    let ref_aba = prepare_reference_image(reference_image.clone(), files.len(), processing_aba);
+    // akaze reference image
+    let mut reference_image_akaze = helpers::load_image(&files[reference_image], colorspace);
+    processing::process(&mut reference_image_akaze, num_files, &preprocessing_akaze);
+    let reference_akaze_data = akaze.map(|akaze| (akaze, self::akaze(&reference_image_akaze, akaze)));
 
     let counter = AtomicU32::new(0);
-    let res = files.into_par_iter()
-        .flat_map(|path| Reader::open(path).ok().and_then(|r| r.decode().ok()).map(|i| i.into_rgb64f()))
-        .fold(|| Vec::new(), |mut diffs, right| {
+    let image_registrations: Vec<_> = files.into_par_iter()
+        .map(|path| (helpers::load_image(&path, colorspace), path))
+        .map(|(image, path)| {
             let count = counter.fetch_add(1, Ordering::Relaxed);
             if count % 50 == 0 {
                 println!("{count}");
             }
-            // let akaze = register_inetrnal(&ref_akaze, right.clone(), num_files, processing_akaze, false).unwrap_or((0, 0));
-            let akaze = (0i32, 0i32);
-            let sod = register_internal(&ref_sod, right.clone(), num_files, processing_sod, false).unwrap_or((0, 0));
-            let aba = register_internal(&ref_aba, right.clone(), num_files, processing_aba, false).unwrap_or((0, 0));
-            diffs.push((akaze, sod, aba));
-            diffs
-        }).reduce(|| Vec::new(), |mut a, b| {
-        a.extend(b);
-        a
-    });
+            let akaze = reference_akaze_data.as_ref().map(|(akaze, reference_akaze_data)| {
+                let mut preprocessed = image.clone();
+                processing::process(&mut preprocessed, num_files, &preprocessing_akaze);
+                let akaze_data = self::akaze(&preprocessed, *akaze);
+                akaze_data.akaze_registration(reference_akaze_data, reference_image_akaze.width(), reference_image_akaze.height())
+            });
+            let mut preprocessed = image;
+            processing::process(&mut preprocessed, num_files, &preprocessing_rest);
+            let (sod, aba) = sod_aba(&preprocessed, single_object_detection, average_brightness_alignment);
+            ImageRegistration {
+                image: path,
+                akaze,
+                sod,
+                aba,
+            }
+        }).collect();
 
-    let (maxabsx, maxabsy) = res.iter().copied()
-        .fold((i32::MIN, i32::MIN), |(maxabsx, maxabsy), diff| {
-            let ((dx1, dy1), (dx2, dy2), (dx3, dy3)) = diff;
+    let reg = Registration {
+        reference_image,
+        images: image_registrations,
+    };
+    helpers::save_registration(outfile, &reg);
+    statistics(&reg);
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Registration {
+    pub reference_image: usize,
+    pub images: Vec<ImageRegistration>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageRegistration {
+    pub image: PathBuf,
+    pub akaze: Option<AkazeRegistration>,
+    pub sod: SodRegistration,
+    pub aba: AbaRegistration,
+}
+impl ImageRegistration {
+    pub fn offsets(&self, reference: &ImageRegistration) -> ((i32, i32), (i32, i32), (i32, i32)) {
+        (
+            self.akaze.map(|a| a.offset()).unwrap_or_default(),
+            self.sod.offset(&reference.sod),
+            self.aba.offset(&reference.aba),
+        )
+    }
+}
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum AkazeRegistration {
+    Offset(f32, f32),
+    Rejected,
+}
+impl AkazeRegistration {
+    pub fn offset(&self) -> (i32, i32) {
+        match self {
+            AkazeRegistration::Rejected => (0, 0),
+            AkazeRegistration::Offset(dx, dy) => (dx.round() as i32, dy.round() as i32)
+        }
+    }
+}
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct SodRegistration {
+    pub left: u32,
+    pub right: u32,
+    pub top: u32,
+    pub bottom: u32,
+}
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct AbaRegistration {
+    pub middlex: f32,
+    pub middley: f32,
+}
+impl SodRegistration {
+    pub fn middle(&self) -> (u32, u32) {
+        let middlex = self.left + (self.right - self.left) / 2;
+        let middley = self.top + (self.bottom - self.top) / 2;
+        (middlex, middley)
+    }
+    pub fn width(&self) -> u32 {
+        self.right - self.left
+    }
+    pub fn height(&self) -> u32 {
+        self.bottom - self.top
+    }
+    pub fn offset(&self, reference: &SodRegistration) -> (i32, i32) {
+        let (x1, y1) = reference.middle();
+        let (x2, y2) = self.middle();
+        (x1 as i32 - x2 as i32, y1 as i32 - y2 as i32)
+    }
+}
+impl AbaRegistration {
+    pub fn offset(&self, reference: &AbaRegistration) -> (i32, i32) {
+        let AbaRegistration { middlex: x1, middley: y1 } = reference;
+        let AbaRegistration { middlex: x2, middley: y2 } = self;
+        (x1.round() as i32 - x2.round() as i32, y1.round() as i32 - y2.round() as i32)
+    }
+}
+
+fn statistics(reg: &Registration) {
+    let reference = &reg.images[reg.reference_image];
+    let (maxabsx, maxabsy) = reg.images.iter()
+        .fold((i32::MIN, i32::MIN), |(maxabsx, maxabsy), reg| {
+            let ((dx1, dy1), (dx2, dy2), (dx3, dy3)) = reg.offsets(reference);
             (
                 maxabsx.max(dx1.abs()).max(dx2.abs()).max(dx3.abs()),
                 maxabsy.max(dy1.abs()).max(dy2.abs()).max(dy3.abs()),
@@ -86,221 +170,160 @@ pub fn register(common: CommonArgs, register: Register) {
         .disable_y_mesh()
         .draw().unwrap();
     scatter_ctx.draw_series(
-        res.iter().copied()
-            .flat_map(|(a, b, c)| [
-                ((a.0 as f32, a.1 as f32), RED),
-                ((b.0 as f32 + 0.3, b.1 as f32), GREEN),
-                ((c.0 as f32, c.1 as f32 + 0.3), BLUE),
-            ]).map(|((x, y), col)| Circle::new((x, y), 2, col.filled())),
+        reg.images.iter()
+            .flat_map(|reg| {
+                let (a, b, c) = reg.offsets(reference);
+                [
+                    ((a.0 as f32, a.1 as f32), RED),
+                    ((b.0 as f32 + 0.3, b.1 as f32), GREEN),
+                    ((c.0 as f32, c.1 as f32 + 0.3), BLUE),
+                ]
+            }).map(|((x, y), col)| Circle::new((x, y), 2, col.filled())),
     ).unwrap();
 
     root.present().unwrap();
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Match {
-    left: (f32, f32),
-    right: (f32, f32),
-    dx: f32,
-    dy: f32,
-    arc: f32,
-    arcdeg: i32,
-}
-
-impl Match {
-    pub fn new(left: (f32, f32), right: (f32, f32)) -> Match {
-        let dx = left.0 - right.0;
-        let dy = left.1 - right.1;
-        let arc = (dy / dx).atan();
-        Match {
-            left, right, arc, dx, dy,
-            arcdeg: (arc / PI * 180.).round() as i32,
-        }
-    }
-}
-
-pub struct ReferenceImage(pub(crate) Rgb64FImage);
-
-pub fn prepare_reference_image(mut reference_image: Rgb64FImage, num_files: usize, processing: &[Processing]) -> ReferenceImage {
-    crate::processing::process(&mut reference_image, num_files, &processing);
-    ReferenceImage(reference_image)
-}
-
-pub fn register_internal(reference: &ReferenceImage, mut img: Rgb64FImage, num_files: usize, mut processing: &[Processing], debug: bool) -> Option<(i32, i32)> {
-    let (registration_function, threshold): (fn(_, _, _, _) -> Vec<Match>, _) = match processing.last() {
-        None => return Some((0, 0)),
-        Some(&Processing::Akaze(threshold)) => (akaze, threshold),
-        Some(&Processing::SingleObjectDetection(threshold)) => (single_object_detection, threshold),
-        Some(&Processing::AverageBrightnessAlignment(threshold)) => (average_brightness_alignment, threshold),
-        _ => unreachable!(),
-    };
-    processing = &processing[..processing.len()-1];
-
-    crate::processing::process(&mut img, num_files, &processing);
-
-    assert_eq!(reference.0.width(), img.width());
-    assert_eq!(reference.0.height(), img.height());
-    let mut res = ImageBuffer::new(reference.0.width() * 2, reference.0.height());
-    res.copy_from(&reference.0, 0, 0).unwrap();
-    res.copy_from(&img, reference.0.width(), 0).unwrap();
-
-    let mut matches = registration_function(reference, &img, threshold, Some(&mut res));
-    matches.sort_by(|m1, m2| m1.arc.total_cmp(&m2.arc));
-
-    if matches.is_empty() {
-        return None;
-    }
-
-    // reject everything deviating >5° from the median
-    let median_arcdeg = matches[matches.len() / 2].arcdeg;
-    matches.retain(|m| (median_arcdeg - m.arcdeg).abs() <= 5);
-
-    if debug {
-        DynamicImage::ImageRgb64F(res).into_rgb16().save("registration.png").unwrap();
-
-        let max_frequency = matches.iter().dedup_by_with_count(|m1, m2| m1.arcdeg == m2.arcdeg)
-            .map(|(count, _arc)| count)
-            .max().unwrap();
-
-        let root = BitMapBackend::new("arc-histogram.png", (1920, 1080)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let mut chart = ChartBuilder::on(&root)
-            .x_label_area_size(100)
-            .y_label_area_size(100)
-            .margin(5)
-            .caption("Arc Histogram", ("sans-serif", 100.0))
-            .build_cartesian_2d(-180i32..180i32, 0u32..max_frequency as u32 + 1).unwrap();
-
-        chart.configure_mesh()
-            .disable_x_mesh()
-            .bold_line_style(&WHITE.mix(0.3))
-            .y_desc("Count")
-            .x_desc("Arc in deg")
-            .axis_desc_style(("sans-serif", 50))
-            .label_style(("sans-serif", 50))
-            .draw().unwrap();
-
-        chart.draw_series(
-            Histogram::vertical(&chart)
-                .style(RED.filled())
-                .data(matches.iter().map(|m| (m.arcdeg, 1)))
-        ).unwrap();
-        root.present().unwrap();
-    }
-
-    // average all resulting offsets
-    let (dx, dy) = matches.iter().fold((0., 0.), |(dx, dy), m| (dx+m.dx, dy+m.dy));
-    Some((
-        (dx / matches.len() as f32).round() as i32,
-        (dy / matches.len() as f32).round() as i32,
-    ))
-}
-
-pub fn akaze(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: Option<&mut Rgb64FImage>) -> Vec<Match> {
-    let width = reference.0.width();
-    let height = reference.0.height();
-
-    let (kps1, desc1) = crate::helpers::akaze(&reference.0, threshold);
-    let (kps2, desc2) = crate::helpers::akaze(img, threshold);
-    const THRESH: f32 = 0.8;
-
-    let mut matches = Vec::new();
-    for (i1, desc1) in desc1.iter().enumerate() {
-        let mut vice = u32::MAX;
-        let mut best = (u32::MAX, 0);
-        for (i2, desc2) in desc2.iter().enumerate() {
-            let dist = desc1.distance(desc2);
-            if dist < best.0 {
-                vice = best.0;
-                best = (dist, i2);
-            }
-        }
-        // only keep matches which are 20% apart from the next-best match
-        if (best.0 as f32) < vice as f32 * THRESH {
-            matches.push((kps1[i1], kps2[best.1]));
-        }
-    }
-
-    // reject all matches that are further apart than 5% of the image size
-    matches.retain(|(kp1, kp2)| {
-        let dx = kp1.point.0 - kp2.point.0;
-        let dy = kp1.point.1 - kp2.point.1;
-        let dist = (dx*dx + dy*dy).sqrt();
-        dist < (width + height) as f32 / 2. / 20.
-    });
-
-    let mut matches: Vec<_> = matches.into_iter().map(|(kp1, kp2)| Match::new(kp1.point, kp2.point)).collect();
-    // reject everything deviating >5° from the median
-    matches.sort_by(|m1, m2| m1.arc.total_cmp(&m2.arc));
-    let median_arcdeg = matches[matches.len() / 2].arcdeg;
-    matches.retain(|m| (median_arcdeg - m.arcdeg).abs() <= 5);
-
-    if let Some(res) = res {
-        for &kp in &kps1 {
-            helpers::akaze_draw_kp(res, kp);
-        }
-        for &kp2 in &kps2 {
-            let kp2 = KeyPoint { point: (kp2.point.0 + width as f32, kp2.point.1), ..kp2 };
-            helpers::akaze_draw_kp(res, kp2);
-        }
-        for &Match { left, right, .. } in &matches {
-            let right = (right.0 + width as f32, right.1);
-            imageproc::drawing::draw_line_segment_mut(res, left, right, Rgb([1.,0.,0.]));
-        }
-    }
-
-    matches
-}
-
-pub fn single_object_detection(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: Option<&mut Rgb64FImage>) -> Vec<Match> {
-    let o1 = helpers::single_object_detection(&reference.0, threshold);
-    let o2 = helpers::single_object_detection(img, threshold);
+fn reject() {
+    // sod
     // reject everything with more than 2% diff from the reference image
     // let dwidth = (o1.width as f32 / o2.width as f32 - 1.).abs();
     // let dheight = (o1.height as f32 / o2.height as f32 - 1.).abs();
     // if dwidth > 0.02 || dheight > 0.02 {
     //     return Vec::new();
     // }
-
-    if let Some(res) = res {
-        let o2right = Object {
-            left: o2.left + reference.0.width(),
-            right: o2.right + reference.0.width(),
-            top: o2.top,
-            bottom: o2.bottom,
-            middle: (o2.middle.0 + reference.0.width(), o2.middle.1),
-            width: o2.width,
-            height: o2.height,
-        };
-        helpers::draw_object(res, o1);
-        helpers::draw_object(res, o2right);
-        imageproc::drawing::draw_line_segment_mut(res, (o1.middle.0 as f32, o1.middle.1 as f32), (o2right.middle.0 as f32, o2right.middle.1 as f32), Rgb([1., 0., 0.]));
-    }
-
-    vec![Match::new(
-        (o1.middle.0 as f32, o1.middle.1 as f32),
-        (o2.middle.0 as f32, o2.middle.1 as f32),
-    )]
 }
 
-pub fn average_brightness_alignment(reference: &ReferenceImage, img: &Rgb64FImage, threshold: f64, res: Option<&mut Rgb64FImage>) -> Vec<Match> {
-    let (leftx, lefty) = helpers::average_brightness(&reference.0, threshold);
-    let (rightx, righty) = helpers::average_brightness(img, threshold);
-    let (leftx, lefty, rightx, righty) = (leftx as f32, lefty as f32, rightx as f32, righty as f32);
-
-    if let Some(res) = res {
-        let w = reference.0.width() as f32;
-        helpers::draw_cross(res, (leftx, lefty));
-        helpers::draw_cross(res, ((rightx + w), righty));
-        imageproc::drawing::draw_line_segment_mut(res, (leftx, lefty), (rightx + w, righty), Rgb([1., 0., 0.]));
+#[derive(Debug, Clone)]
+pub struct AkazeData {
+    pub keypoints: Vec<KeyPoint>,
+    pub descriptions: Vec<BitArray<64>>,
+}
+#[derive(Debug, Copy, Clone)]
+pub struct Match {
+    pub left: (f32, f32),
+    pub right: (f32, f32),
+}
+impl Match {
+    pub fn dx(&self) -> f32 {
+        self.left.0 - self.right.0
     }
-
-    vec![Match::new(
-        (leftx as f32, lefty as f32),
-        (rightx as f32, righty as f32),
-    )]
+    pub fn dy(&self) -> f32 {
+        self.left.1 - self.right.1
+    }
+    pub fn arc(&self) -> f32 {
+        (self.dy() / self.dx()).atan()
+    }
+    pub fn arcdeg(&self) -> i32 {
+        (self.arc() / PI * 180.).round() as i32
+    }
 }
 
-pub fn noop(_reference: &ReferenceImage, _img: &Rgb64FImage, _threshold: f64, _res: Option<&mut Rgb64FImage>) -> Vec<Match> {
-    vec![Match::new((0., 0.), (0., 0.))]
+impl AkazeData {
+    pub fn matches(&self, other: &AkazeData, width: u32, height: u32) -> Vec<Match> {
+        let mut matches = self.matches_unrejected(other);
+        Self::reject_matches(&mut matches, width, height);
+        matches
+    }
+    pub fn matches_unrejected(&self, other: &AkazeData) -> Vec<Match> {
+        const THRESH: f32 = 0.8;
+
+        let mut matches = Vec::new();
+        for (i1, desc1) in self.descriptions.iter().enumerate() {
+            let mut vice = u32::MAX;
+            let mut best = (u32::MAX, 0);
+            for (i2, desc2) in other.descriptions.iter().enumerate() {
+                let dist = desc1.distance(desc2);
+                if dist < best.0 {
+                    vice = best.0;
+                    best = (dist, i2);
+                }
+            }
+            // only keep matches which are 20% apart from the next-best match
+            if (best.0 as f32) < vice as f32 * THRESH {
+                let kp1 = self.keypoints[i1];
+                let kp2 = other.keypoints[best.1];
+                matches.push(Match {
+                    left: kp1.point,
+                    right: kp2.point,
+                });
+            }
+        }
+        matches
+    }
+    pub fn reject_matches(matches: &mut Vec<Match>, _width: u32, _height: u32) {
+        // // reject all matches that are further apart than 5% of the image size
+        // matches.retain(|Match { left, right }| {
+        //     let dx = left.0 - right.0;
+        //     let dy = left.1 - right.1;
+        //     let dist = (dx*dx + dy*dy).sqrt();
+        //     dist < (width + height) as f32 / 2. / 20.
+        // });
+
+        // reject everything deviating >5° from the median
+        matches.sort_by(|m1, m2| m1.arc().total_cmp(&m2.arc()));
+        let median_arcdeg = matches[matches.len() / 2].arcdeg();
+        matches.retain(|m| (median_arcdeg - m.arcdeg()).abs() <= 5);
+    }
+
+    pub fn akaze_registration(&self, reference: &AkazeData, width: u32, height: u32) -> AkazeRegistration {
+        let matches = reference.matches(self, width, height);
+        if matches.is_empty() {
+            return AkazeRegistration::Rejected;
+        }
+
+        // average all resulting offsets
+        let matches_len = matches.len();
+        let (dx, dy) = matches.into_iter().fold((0., 0.), |(dx, dy), m| (dx+m.dx(), dy+m.dy()));
+        AkazeRegistration::Offset(dx / matches_len as f32, dy / matches_len as f32)
+    }
+}
+
+pub fn akaze(buf: &Rgb64FImage, threshold: f64) -> AkazeData {
+    let detector = Akaze::new(threshold);
+    let luma16: ImageBuffer<Luma<u16>, Vec<u16>> = buf.convert();
+    let (key_points, descriptions) = detector.extract(&DynamicImage::ImageLuma16(luma16));
+    AkazeData { keypoints: key_points, descriptions }
+}
+
+pub fn sod_aba(buf: &Rgb64FImage, threshold_sod: f64, threshold_aba: f64) -> (SodRegistration, AbaRegistration) {
+    let mut left = u32::MAX;
+    let mut right = 0;
+    let mut top = u32::MAX;
+    let mut bottom = 0;
+    let mut sum = 0.0;
+    let mut weighted_sum_rows = 0.0;
+    let mut weighted_sum_columns = 0.0;
+
+    for (x, y, pixel) in buf.enumerate_pixels() {
+        let value = pixel.0.into_iter().sum::<f64>() / 3.;
+        // single object detection
+        if value >= threshold_sod {
+            left = x.min(left);
+            right = x.max(right);
+            top = y.min(top);
+            bottom = y.max(bottom);
+        }
+        // average brightness alignment
+        if value >= threshold_aba {
+            sum += value;
+            weighted_sum_rows += y as f64 * value;
+            weighted_sum_columns += x as f64 * value;
+        }
+    }
+    let sod = SodRegistration { left, right, top, bottom };
+
+    let middlex = (weighted_sum_columns / sum) as f32;
+    let middley = (weighted_sum_rows / sum) as f32;
+    let aba = AbaRegistration { middlex, middley };
+
+    (sod, aba)
+}
+
+pub fn single_object_detection(buf: &Rgb64FImage, threshold: f64) -> SodRegistration {
+    sod_aba(buf, threshold, 1.0).0
+}
+
+pub fn average_brightness(buf: &Rgb64FImage, threshold: f64) -> AbaRegistration {
+    sod_aba(buf, 1.0, threshold).1
 }

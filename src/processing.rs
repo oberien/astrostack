@@ -1,5 +1,5 @@
 use image::{DynamicImage, Rgb, Rgb64FImage};
-use crate::{helpers, Processing};
+use crate::{helpers, Processing, register};
 
 pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing]) {
     for postprocess in processing {
@@ -88,17 +88,17 @@ pub fn black_while(buf: &mut Rgb64FImage, threshold: f64) {
 }
 
 pub fn single_object_detection(buf: &mut Rgb64FImage, threshold: f64) {
-    let object = helpers::single_object_detection(buf, threshold);
-    helpers::draw_object(buf, object);
+    let sod = register::single_object_detection(buf, threshold);
+    helpers::draw_object(buf, sod);
 }
 pub fn average_brightness_alignment(buf: &mut Rgb64FImage, threshold: f64) {
-    let (x,y) = helpers::average_brightness(buf, threshold);
-    helpers::draw_cross(buf, (x as f32, y as f32));
+    let aba = register::average_brightness(buf, threshold);
+    helpers::draw_cross(buf, (aba.middlex, aba.middley));
 }
 
 pub fn akaze_draw(buf: &mut Rgb64FImage, threshold: f64) {
-    let (keypoints, _descriptors) = helpers::akaze(buf, threshold);
-    for keypoint in keypoints {
+    let akaze = register::akaze(buf, threshold);
+    for keypoint in akaze.keypoints {
         helpers::akaze_draw_kp(buf, keypoint);
     }
 }

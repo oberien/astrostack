@@ -21,11 +21,11 @@ struct Cli {
 
 #[derive(Debug, Args)]
 pub struct CommonArgs {
-    #[arg(short = 'c', long, value_enum, default_value = "srgb")]
+    #[arg(global = true, short = 'c', long, value_enum, default_value = "srgb")]
     colorspace: Colorspace,
-    #[arg(short = 'n', default_value_t = 100)]
+    #[arg(global = true, short = 'n', default_value_t = 100)]
     num_files: usize,
-    #[arg(short = 's', default_value_t = 0)]
+    #[arg(global = true, short = 's', default_value_t = 0)]
     skip_files: usize,
 }
 
