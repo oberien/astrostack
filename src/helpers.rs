@@ -1,11 +1,14 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use cv::feature::akaze::KeyPoint;
-use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb64FImage};
+use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb64FImage, RgbImage};
 use image::io::Reader;
 use crate::Colorspace;
 use crate::register::{Registration, SodRegistration};
 
+pub fn load_image_rgb8<P: AsRef<Path>>(path: P) -> RgbImage {
+    Reader::open(path).unwrap().decode().unwrap().into_rgb8()
+}
 pub fn load_image<P: AsRef<Path>>(path: P, colorspace: Colorspace) -> Rgb64FImage {
     let mut img = Reader::open(path).unwrap().decode().unwrap().into_rgb64f();
     for px in img.pixels_mut() {
@@ -25,6 +28,32 @@ pub fn load_registration<P: AsRef<Path>>(path: P) -> Registration {
 }
 pub fn save_registration<P: AsRef<Path>>(path: P, registration: &Registration) {
     serde_json::to_writer(File::create(path).unwrap(), registration).unwrap();
+}
+
+pub fn clamp_slice<T>(mut slice: &[T], skip: usize, len: usize) -> &[T] {
+    if skip >= slice.len() {
+        return &[];
+    }
+    slice = &slice[skip..];
+    let len = if len == 0 {
+        slice.len()
+    } else {
+        slice.len().min(len)
+    };
+    &slice[..len]
+}
+
+pub fn offset_image(image: &RgbImage, (dx, dy): (i32, i32)) -> RgbImage {
+    let width = image.width();
+    let height = image.height();
+    let mut frame = RgbImage::new(width, height);
+    let sourcex = (-dx).max(0) as u32;
+    let sourcey = (-dy).max(0) as u32;
+    let view_width = (width as i32 + dx).min(width as i32 - dx.max(0)) as u32;
+    let view_height = (height as i32 + dy).min(height as i32 - dy.max(0)) as u32;
+    let view = image.view(sourcex, sourcey, view_width, view_height);
+    frame.copy_from(&*view, dx.max(0) as u32, dy.max(0) as u32).unwrap();
+    frame
 }
 
 pub fn path_with_suffix<P: AsRef<Path>>(prefix: P, suffix: &str) -> PathBuf {

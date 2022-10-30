@@ -14,12 +14,7 @@ pub fn stack(common: CommonArgs, stack: Stack) {
     let width = ref_img.width();
     let height = ref_img.height();
 
-    let num_files = if num_files == 0 {
-        registration.images.len()
-    } else {
-        registration.images.len().min(num_files)
-    };
-    let images = &registration.images[skip_files..][..num_files];
+    let images = helpers::clamp_slice(&registration.images, skip_files, num_files);
 
     let creation_fn = || {
         let img = Rgb64FImage::new(width, height);

@@ -16,6 +16,8 @@ plotters = "0.3.4"
 itertools = "0.10.5"
 serde = { version = "1.0.145", features = ["derive"] }
 serde_json = "1.0.86"
+openh264 = "0.2.18"
+minimp4 = { git = "https://github.com/darkskygit/minimp4.rs" }
 
 [patch.crates-io]
 #image = { path = "../image" }
