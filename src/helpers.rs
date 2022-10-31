@@ -6,9 +6,6 @@ use image::io::Reader;
 use crate::Colorspace;
 use crate::register::{Registration, SodRegistration};
 
-pub fn load_image_rgb8<P: AsRef<Path>>(path: P) -> RgbImage {
-    Reader::open(path).unwrap().decode().unwrap().into_rgb8()
-}
 pub fn load_image<P: AsRef<Path>>(path: P, colorspace: Colorspace) -> Rgb64FImage {
     let mut img = Reader::open(path).unwrap().decode().unwrap().into_rgb64f();
     for px in img.pixels_mut() {

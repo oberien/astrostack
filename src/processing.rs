@@ -6,6 +6,7 @@ pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing
         match postprocess {
             Processing::Average => average(buf, num_files),
             Processing::Maxscale => maxscale(buf),
+            &Processing::MaxscaleFixed(maxcol) => maxscale_fixed(buf, maxcol),
             Processing::Sqrt => sqrt(buf),
             Processing::Asinh => asinh(buf),
             &Processing::Sobel(blur) => sobel(buf, blur),
@@ -27,14 +28,25 @@ pub fn average(buf: &mut Rgb64FImage, num_files: usize) {
     }
 }
 
-pub fn maxscale(buf: &mut Rgb64FImage) {
-    let maxcol = buf.pixels()
+pub fn maxcol(buf: &Rgb64FImage) -> f64 {
+    buf.pixels()
         .fold(0_f64, |maxcol, px| {
             let maxcol = maxcol.max(px.0[0]);
             let maxcol = maxcol.max(px.0[1]);
             let maxcol = maxcol.max(px.0[2]);
             maxcol
-        });
+        })
+}
+pub fn maxscale(buf: &mut Rgb64FImage) {
+    let maxcol = maxcol(buf);
+    for pixel in buf.pixels_mut() {
+        pixel.0[0] /= maxcol;
+        pixel.0[1] /= maxcol;
+        pixel.0[2] /= maxcol;
+    }
+}
+
+pub fn maxscale_fixed(buf: &mut Rgb64FImage, maxcol: f64) {
     for pixel in buf.pixels_mut() {
         pixel.0[0] /= maxcol;
         pixel.0[1] /= maxcol;

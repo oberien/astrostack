@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+cargo run --release -- video -n 200 -o video_aligned
+cargo run --release -- video -n 200 -o video_rejected -r "regressionaba,widthheight"
+
+ffmpeg -y -i video_aligned_orig.mp4 -i video_aligned_akaze.mp4 -i video_aligned_sod.mp4 -i video_aligned_aba.mp4 -i video_rejected_sod.mp4 -i video_rejected_aba.mp4 \
+-filter_complex "[0:v][1:v]hstack[a];[2:v][3:v]hstack[b];[4:v][5:v]hstack[c];[a][b]vstack[v];[v][c]vstack[o]" \
+-map "[o]" output.mp4

@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use image::Rgb64FImage;
 use rayon::iter::{ParallelIterator, IntoParallelRefIterator};
-use crate::{Colorspace, CommonArgs, helpers, processing, Stack};
+use crate::{Colorspace, CommonArgs, helpers, processing, rejection, Stack};
 use crate::register::AkazeRegistration;
 
 pub fn stack(common: CommonArgs, stack: Stack) {
     let CommonArgs { colorspace, num_files, skip_files } = common;
-    let Stack { registration_input, postprocessing, outfile_prefix } = stack;
+    let Stack { registration_input, rejection, postprocessing, outfile_prefix } = stack;
 
     let registration = helpers::load_registration(registration_input);
     let reference_image = &registration.images[registration.reference_image];
@@ -14,7 +14,10 @@ pub fn stack(common: CommonArgs, stack: Stack) {
     let width = ref_img.width();
     let height = ref_img.height();
 
+    println!("Starting rejection");
     let images = helpers::clamp_slice(&registration.images, skip_files, num_files);
+    let images = rejection::reject(&registration, images.to_owned(), &rejection);
+    println!("Rejection finished");
 
     let creation_fn = || {
         let img = Rgb64FImage::new(width, height);
@@ -41,12 +44,8 @@ pub fn stack(common: CommonArgs, stack: Stack) {
             }
 
             // sod
-            if !reg.sod.should_reject(&reference_image.sod) {
-                let (dx, dy) = reg.sod.offset(&reference_image.sod);
-                stack_into(&mut sod, &image, dx, dy);
-            } else {
-                println!("rejected sod {count:05}");
-            }
+            let (dx, dy) = reg.sod.offset(&reference_image.sod);
+            stack_into(&mut sod, &image, dx, dy);
 
             // aba
             let (dx, dy) = reg.aba.offset(&reference_image.aba);

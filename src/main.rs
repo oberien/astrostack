@@ -9,6 +9,20 @@ mod compare;
 mod register;
 mod video;
 mod stack;
+mod rejection;
+
+fn main() {
+    let args: Cli = Cli::parse();
+    dbg!(&args);
+
+    match args.command {
+        Command::Process(proc) => process::process(args.common, proc),
+        Command::Register(reg) => register::register(args.common, reg),
+        Command::Compare(cmp) => compare::compare(args.common, cmp),
+        Command::Video(video) => video::video(args.common, video),
+        Command::Stack(stack) => stack::stack(args.common, stack),
+    }
+}
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -106,6 +120,13 @@ pub struct Register {
 pub struct Video {
     #[arg(short = 'i', long, default_value = "registration_data.json")]
     registration_input: PathBuf,
+    #[arg(short = 'r', long, value_parser=ValueParser::new(parse_rejection), value_delimiter=',')]
+    rejection: Vec<Rejection>,
+    #[arg(
+        short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        default_value = "maxscale",
+    )]
+    processing: Vec<Processing>,
     #[arg(short = 'o', long, default_value = "video_aligned")]
     outfile_prefix: PathBuf,
 }
@@ -114,6 +135,11 @@ pub struct Video {
 pub struct Stack {
     #[arg(short = 'i', long, default_value = "registration_data.json")]
     registration_input: PathBuf,
+    #[arg(
+        short = 'r', long, value_parser=ValueParser::new(parse_rejection), value_delimiter=',',
+        default_value = "regressionaba,widthheight",
+    )]
+    rejection: Vec<Rejection>,
     #[arg(
         short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
         default_value = "maxscale",
@@ -130,10 +156,12 @@ pub enum Colorspace {
     Quadratic,
     Sqrt,
 }
+
 #[derive(Debug, Copy, Clone)]
 pub enum Processing {
     Average,
     Maxscale,
+    MaxscaleFixed(f64),
     Sqrt,
     Asinh,
     /// sobel edgeg detection with passed blur, 1 by default
@@ -151,20 +179,6 @@ pub enum Processing {
     /// detect the pixel with the average brightness given threshold (0.2)
     AverageBrightnessAlignment(f64),
 }
-
-fn main() {
-    let args: Cli = Cli::parse();
-    dbg!(&args);
-
-    match args.command {
-        Command::Process(proc) => process::process(args.common, proc),
-        Command::Register(reg) => register::register(args.common, reg),
-        Command::Compare(cmp) => compare::compare(args.common, cmp),
-        Command::Video(video) => video::video(args.common, video),
-        Command::Stack(stack) => stack::stack(args.common, stack),
-    }
-}
-
 fn parse_postprocessing(p: &str) -> Result<Processing, String> {
     let mut parts = p.split("=");
     let typ = parts.next().unwrap();
@@ -180,12 +194,48 @@ fn parse_postprocessing(p: &str) -> Result<Processing, String> {
         "sqrt" => Ok(Processing::Sqrt),
         "asinh" => Ok(Processing::Asinh),
         "akaze" => Ok(Processing::Akaze(value!(value, 0.0008))),
-        "sobel" => Ok(Processing::Sobel(value!(value, 1))),
+        "sobel" => Ok(Processing::Sobel(value!(value, 0))),
         "blur" => Ok(Processing::Blur(value!(value, 1.0))),
         "bgone" => Ok(Processing::BGone(value!(value, 0.2))),
-        "bw" => Ok(Processing::BlackWhite(value!(value, 0.5))),
+        "bw" => Ok(Processing::BlackWhite(value!(value, 0.2))),
         "sod" => Ok(Processing::SingleObjectDetection(value!(value, 0.2))),
         "aba" => Ok(Processing::AverageBrightnessAlignment(value!(value, 0.2))),
-        _ => Err(format!("unknown postprocessing `{typ}`, allowed values are `average`, `maxscale`, `sqrt`, `asinh`, `akaze=0.008`, `sobel=1`, `blur=1.0."))
+        _ => Err(format!(
+            "unknown processing `{typ}`, allowed values are `average`, `maxscale`,\
+            `sqrt`, `asinh`, `akaze=0.0008`, `sobel=0`, `blur=1.0`, `bgone=0.2`,\
+            `bw=0.2`, `sod=0.2`, `aba=0.2`."
+        ))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Rejection {
+    AverageSod(f32),
+    AverageAba(f32),
+    RegressionAkaze(f32),
+    RegressionSod(f32),
+    RegressionAba(f32),
+    WidthHeight(f32),
+}
+fn parse_rejection(p: &str) -> Result<Rejection, String> {
+    let mut parts = p.split("=");
+    let typ = parts.next().unwrap();
+    let value = parts.next();
+    macro_rules! value {
+        ($value:expr, $default:expr) => {
+            $value.map(|s| s.parse()).unwrap_or(Ok($default)).map_err(|e| format!("{e}"))?
+        }
+    }
+    match typ {
+        "averagesod" => Ok(Rejection::AverageSod(value!(value, 0.01))),
+        "averageaba" => Ok(Rejection::AverageAba(value!(value, 0.01))),
+        "regressionakaze" => Ok(Rejection::RegressionAkaze(value!(value, 0.001))),
+        "regressionsod" => Ok(Rejection::RegressionSod(value!(value, 0.001))),
+        "regressionaba" => Ok(Rejection::RegressionAba(value!(value, 0.001))),
+        "widthheight" => Ok(Rejection::WidthHeight(value!(value, 0.02))),
+        _ => Err(format!(
+            "unknown rejection `{typ}`, allowed values are `averagesod=0.01`, `averageaba=0.01`,\
+            `regressionakaze=0.001`, `regressionsod=0.001`, `regressionaba=0.001`."
+        ))
     }
 }
