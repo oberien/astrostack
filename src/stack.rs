@@ -6,7 +6,7 @@ use crate::register::AkazeRegistration;
 
 pub fn stack(common: CommonArgs, stack: Stack) {
     let CommonArgs { colorspace, num_files, skip_files } = common;
-    let Stack { registration_input, rejection, postprocessing, outfile_prefix } = stack;
+    let Stack { registration_input, rejection, preprocessing, postprocessing, outfile_prefix } = stack;
 
     let registration = helpers::load_registration(registration_input);
     let reference_image = &registration.images[registration.reference_image];
@@ -28,11 +28,13 @@ pub fn stack(common: CommonArgs, stack: Stack) {
     let counter = AtomicU32::new(0);
     let (mut akaze, mut sod, mut aba) = images.par_iter()
         .map(|reg| (helpers::load_image(&reg.image, colorspace), reg))
-        .fold(creation_fn, |(mut akaze, mut sod, mut aba), (image, reg)| {
+        .fold(creation_fn, |(mut akaze, mut sod, mut aba), (mut image, reg)| {
             let count = counter.fetch_add(1, Ordering::Relaxed);
             if count % 50 == 0 {
                 println!("{count}");
             }
+
+            processing::process(&mut image, num_files, &preprocessing);
 
             // akaze
             match reg.akaze {

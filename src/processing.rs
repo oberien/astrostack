@@ -1,4 +1,4 @@
-use image::{DynamicImage, Rgb, Rgb64FImage};
+use image::{DynamicImage, imageops, Rgb, Rgb64FImage};
 use crate::{helpers, Processing, register};
 
 pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing]) {
@@ -9,6 +9,7 @@ pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing
             &Processing::MaxscaleFixed(maxcol) => maxscale_fixed(buf, maxcol),
             Processing::Sqrt => sqrt(buf),
             Processing::Asinh => asinh(buf),
+            Processing::Sharpen => sharpen(buf),
             &Processing::Sobel(blur) => sobel(buf, blur),
             &Processing::Blur(sigma) => gaussian_blur(buf, sigma),
             &Processing::BGone(threshold) => background_extract(buf, threshold),
@@ -68,6 +69,13 @@ pub fn asinh(buf: &mut Rgb64FImage) {
         pixel.0[1] = pixel.0[1].asinh();
         pixel.0[2] = pixel.0[2].asinh();
     }
+}
+pub fn sharpen(buf: &mut Rgb64FImage) {
+    *buf = imageops::filter3x3(buf, &[
+         0., -1.,  0.,
+        -1.,  5., -1.,
+         0., -1.,  0.,
+    ]);
 }
 
 pub fn sobel(buf: &mut Rgb64FImage, blur: i32) {

@@ -141,7 +141,12 @@ pub struct Stack {
     )]
     rejection: Vec<Rejection>,
     #[arg(
-        short = 'p', long, value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        long = "pre", value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
+        default_value = "bgone=0.025",
+    )]
+    preprocessing: Vec<Processing>,
+    #[arg(
+        short = 'p', long = "post", value_parser=ValueParser::new(parse_postprocessing), value_delimiter=',',
         default_value = "maxscale",
     )]
     postprocessing: Vec<Processing>,
@@ -164,6 +169,7 @@ pub enum Processing {
     MaxscaleFixed(f64),
     Sqrt,
     Asinh,
+    Sharpen,
     /// sobel edgeg detection with passed blur, 1 by default
     Sobel(i32),
     /// gaussian blur with passed sigma, 1.0 by default
@@ -188,11 +194,20 @@ fn parse_postprocessing(p: &str) -> Result<Processing, String> {
             $value.map(|s| s.parse()).unwrap_or(Ok($default)).map_err(|e| format!("{e}"))?
         }
     }
+    let no_value = |p| {
+        dbg!(value);
+        if value.is_none() {
+            Ok(p)
+        } else {
+            Err("no value allowed".to_string())
+        }
+    };
     match typ {
-        "average" => Ok(Processing::Average),
-        "maxscale" => Ok(Processing::Maxscale),
-        "sqrt" => Ok(Processing::Sqrt),
-        "asinh" => Ok(Processing::Asinh),
+        "average" => no_value(Processing::Average),
+        "maxscale" => no_value(Processing::Maxscale),
+        "sqrt" => no_value(Processing::Sqrt),
+        "asinh" => no_value(Processing::Asinh),
+        "sharpen" => no_value(Processing::Sharpen),
         "akaze" => Ok(Processing::Akaze(value!(value, 0.0008))),
         "sobel" => Ok(Processing::Sobel(value!(value, 0))),
         "blur" => Ok(Processing::Blur(value!(value, 1.0))),
