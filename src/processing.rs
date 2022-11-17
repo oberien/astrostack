@@ -1,4 +1,5 @@
 use image::{DynamicImage, imageops, Rgb, Rgb64FImage};
+use ordered_float::NotNan;
 use crate::{helpers, Processing, register};
 
 pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing]) {
@@ -12,6 +13,7 @@ pub fn process(buf: &mut Rgb64FImage, num_files: usize, processing: &[Processing
             Processing::Sharpen => sharpen(buf),
             &Processing::Sobel(blur) => sobel(buf, blur),
             &Processing::Blur(sigma) => gaussian_blur(buf, sigma),
+            &Processing::Median(radius) => median(buf, radius),
             &Processing::BGone(threshold) => background_extract(buf, threshold),
             &Processing::BlackWhite(threshold) => black_while(buf, threshold),
             &Processing::Akaze(threshold) => akaze_draw(buf, threshold),
@@ -70,12 +72,57 @@ pub fn asinh(buf: &mut Rgb64FImage) {
         pixel.0[2] = pixel.0[2].asinh();
     }
 }
+
 pub fn sharpen(buf: &mut Rgb64FImage) {
     *buf = imageops::filter3x3(buf, &[
          0., -1.,  0.,
         -1.,  5., -1.,
          0., -1.,  0.,
     ]);
+}
+
+pub fn median(buf: &mut Rgb64FImage, radius: u32) {
+    // prepare bitmap
+    let radius: i32 = radius.try_into().unwrap();
+    let side_len = radius as usize * 2 + 1;
+    let mut bitmap = bitvec::bitvec![0; side_len * side_len];
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            let in_range = dy.abs() + dx.abs() <= radius;
+            let index = (dy + radius) as usize * side_len + (dx + radius) as usize;
+            bitmap.set(index, in_range);
+        }
+    }
+
+    let orig = buf.clone();
+    let mut reds = Vec::with_capacity(side_len * side_len);
+    let mut greens = Vec::with_capacity(side_len * side_len);
+    let mut blues = Vec::with_capacity(side_len * side_len);
+    for (x, y, pixel) in buf.enumerate_pixels_mut() {
+        reds.clear();
+        greens.clear();
+        blues.clear();
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let index = (dy + radius) as usize * side_len + (dx + radius) as usize;
+                if !bitmap[index] {
+                    continue;
+                }
+                let x = (x as i32 + dx).max(0).min(orig.width() as i32 - 1) as u32;
+                let y = (y as i32 + dy).max(0).min(orig.height() as i32 - 1) as u32;
+                reds.push(NotNan::new(orig[(x, y)].0[0]).unwrap());
+                greens.push(NotNan::new(orig[(x, y)].0[1]).unwrap());
+                blues.push(NotNan::new(orig[(x, y)].0[2]).unwrap());
+            }
+        }
+        reds.sort();
+        greens.sort();
+        blues.sort();
+        let red = reds[(reds.len() + 1) / 2].into_inner();
+        let green = greens[(greens.len() + 1) / 2].into_inner();
+        let blue = blues[(blues.len() + 1) / 2].into_inner();
+        *pixel = Rgb([red, green, blue]);
+    }
 }
 
 pub fn sobel(buf: &mut Rgb64FImage, blur: i32) {

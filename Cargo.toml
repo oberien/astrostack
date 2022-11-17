@@ -19,6 +19,8 @@ serde_json = "1.0.86"
 openh264 = "0.2.18"
 minimp4 = { git = "https://github.com/darkskygit/minimp4.rs" }
 linreg = "0.2.0"
+bitvec = "1.0.1"
+ordered-float = "3.4.0"
 
 [patch.crates-io]
 #image = { path = "../image" }

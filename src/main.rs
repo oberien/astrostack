@@ -174,6 +174,8 @@ pub enum Processing {
     Sobel(i32),
     /// gaussian blur with passed sigma, 1.0 by default
     Blur(f32),
+    /// Median of a single image of pixels in the given radius
+    Median(u32),
     /// bg extraction using the given threshold to make pixels black (0.2)
     BGone(f64),
     /// convert the image to a black-white image using the given threshold (0.5)
@@ -211,6 +213,7 @@ fn parse_postprocessing(p: &str) -> Result<Processing, String> {
         "akaze" => Ok(Processing::Akaze(value!(value, 0.0008))),
         "sobel" => Ok(Processing::Sobel(value!(value, 0))),
         "blur" => Ok(Processing::Blur(value!(value, 1.0))),
+        "median" => Ok(Processing::Median(value!(value, 2))),
         "bgone" => Ok(Processing::BGone(value!(value, 0.2))),
         "bw" => Ok(Processing::BlackWhite(value!(value, 0.2))),
         "sod" => Ok(Processing::SingleObjectDetection(value!(value, 0.2))),
