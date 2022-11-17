@@ -118,9 +118,9 @@ pub fn median(buf: &mut Rgb64FImage, radius: u32) {
         reds.sort();
         greens.sort();
         blues.sort();
-        let red = reds[(reds.len() + 1) / 2].into_inner();
-        let green = greens[(greens.len() + 1) / 2].into_inner();
-        let blue = blues[(blues.len() + 1) / 2].into_inner();
+        let red = reds[reds.len() / 2].into_inner();
+        let green = greens[greens.len() / 2].into_inner();
+        let blue = blues[blues.len() / 2].into_inner();
         *pixel = Rgb([red, green, blue]);
     }
 }
